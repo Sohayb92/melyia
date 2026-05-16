@@ -1,0 +1,1244 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Melyia — Mes devis dentaires</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/dexie@4.0.8/dist/dexie.min.js"></script>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    .view { display: none; }
+    .view.active { display: block; }
+    .toast {
+      position: fixed; top: 20px; right: 20px; z-index: 100;
+      padding: 14px 20px; border-radius: 10px; font-weight: 500;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.15);
+      animation: slideIn 0.3s ease-out;
+      max-width: 380px;
+    }
+    @keyframes slideIn { from { transform: translateX(120%); } to { transform: translateX(0); } }
+    .paste-zone {
+      border: 2px dashed #cbd5e1;
+      transition: all 0.2s;
+      min-height: 220px;
+    }
+    .paste-zone.drag-over { border-color: #6366f1; background-color: #eef2ff; }
+    .badge { display: inline-flex; align-items: center; padding: 2px 10px; border-radius: 9999px; font-size: 12px; font-weight: 600; }
+    .badge-pending { background: #fef3c7; color: #92400e; }
+    .badge-relance { background: #fee2e2; color: #991b1b; }
+    .badge-accepted { background: #d1fae5; color: #065f46; }
+    .badge-refused { background: #e5e7eb; color: #4b5563; }
+    .badge-noresponse { background: #f3e8ff; color: #6b21a8; }
+    .spinner {
+      display: inline-block; width: 18px; height: 18px;
+      border: 2.5px solid rgba(255,255,255,0.3);
+      border-top-color: #fff; border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .step-active { background: #4f46e5; color: #fff; }
+    .step-done { background: #10b981; color: #fff; }
+    .step-todo { background: #e2e8f0; color: #64748b; }
+    textarea, input { font-family: inherit; }
+    .mail-preview {
+      background: #fafbfc;
+      border: 1px solid #e2e8f0;
+      border-radius: 10px;
+      padding: 18px;
+      white-space: pre-wrap;
+      font-size: 14px;
+      line-height: 1.6;
+      max-height: 400px;
+      overflow-y: auto;
+    }
+    .nav-link {
+      padding: 10px 16px; border-radius: 8px; font-weight: 500; cursor: pointer;
+      transition: all 0.15s; color: #475569; display: inline-flex; align-items: center; gap: 8px;
+    }
+    .nav-link:hover { background: #f1f5f9; color: #0f172a; }
+    .nav-link.active { background: #4f46e5; color: #fff; }
+    .nav-link.active:hover { background: #4338ca; color: #fff; }
+  </style>
+</head>
+<body class="bg-slate-50 min-h-screen">
+
+  <!-- Top Navigation -->
+  <header class="bg-white border-b border-slate-200 sticky top-0 z-40">
+    <div class="max-w-6xl mx-auto px-6 py-3 flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <div class="w-9 h-9 rounded-lg bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white font-bold text-sm">M</div>
+        <div>
+          <div class="font-bold text-slate-900">Melyia</div>
+          <div class="text-xs text-slate-500">Suivi de mes devis</div>
+        </div>
+      </div>
+      <nav class="flex items-center gap-1">
+        <a class="nav-link active" data-view="dashboard">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+          Tableau de bord
+          <span id="nav-relance-badge" class="hidden ml-1 px-1.5 py-0.5 bg-rose-500 text-white text-xs rounded-full font-bold"></span>
+        </a>
+        <a class="nav-link" data-view="new">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          Nouveau devis
+        </a>
+        <a class="nav-link" data-view="settings">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+          Paramètres
+        </a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="max-w-6xl mx-auto px-6 py-8">
+
+    <!-- VIEW: DASHBOARD -->
+    <section id="view-dashboard" class="view active">
+      <div class="mb-8">
+        <h1 class="text-2xl font-bold text-slate-900 mb-1">Tableau de bord</h1>
+        <p class="text-slate-500 text-sm">Vue d'ensemble de tes devis et relances.</p>
+      </div>
+
+      <!-- Stats cards -->
+      <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
+        <div class="bg-white rounded-xl p-5 border border-slate-200">
+          <div class="text-xs text-slate-500 font-medium uppercase tracking-wide">Total devis</div>
+          <div class="text-3xl font-bold text-slate-900 mt-1" id="stat-total">0</div>
+          <div class="text-xs text-slate-500 mt-2" id="stat-total-amount">0 €</div>
+        </div>
+        <div class="bg-white rounded-xl p-5 border border-slate-200">
+          <div class="text-xs text-amber-600 font-medium uppercase tracking-wide">En attente</div>
+          <div class="text-3xl font-bold text-slate-900 mt-1" id="stat-pending">0</div>
+          <div class="text-xs text-slate-500 mt-2" id="stat-pending-amount">0 €</div>
+        </div>
+        <div class="bg-white rounded-xl p-5 border border-slate-200">
+          <div class="text-xs text-emerald-600 font-medium uppercase tracking-wide">Acceptés</div>
+          <div class="text-3xl font-bold text-slate-900 mt-1" id="stat-accepted">0</div>
+          <div class="text-xs text-slate-500 mt-2" id="stat-accepted-amount">0 €</div>
+        </div>
+        <div class="bg-white rounded-xl p-5 border border-slate-200">
+          <div class="text-xs text-indigo-600 font-medium uppercase tracking-wide">Taux d'acceptation</div>
+          <div class="text-3xl font-bold text-slate-900 mt-1" id="stat-rate">—</div>
+          <div class="text-xs text-slate-500 mt-2">sur les devis traités</div>
+        </div>
+      </div>
+
+      <!-- Relances dues -->
+      <div id="relances-section" class="hidden mb-8">
+        <div class="bg-rose-50 border border-rose-200 rounded-xl p-5">
+          <div class="flex items-center gap-2 mb-3">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#dc2626" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+            <h2 class="font-bold text-rose-900">À relancer aujourd'hui</h2>
+            <span class="badge badge-relance" id="relances-count">0</span>
+          </div>
+          <div id="relances-list" class="space-y-2"></div>
+        </div>
+      </div>
+
+      <!-- Liste devis -->
+      <div class="bg-white rounded-xl border border-slate-200">
+        <div class="p-5 border-b border-slate-100 flex items-center justify-between">
+          <h2 class="font-bold text-slate-900">Mes devis</h2>
+          <div class="flex items-center gap-2">
+            <select id="filter-status" class="text-sm border border-slate-200 rounded-lg px-3 py-1.5 bg-white">
+              <option value="">Tous les statuts</option>
+              <option value="En attente">En attente</option>
+              <option value="Accepté">Accepté</option>
+              <option value="Refusé">Refusé</option>
+              <option value="Sans réponse">Sans réponse</option>
+            </select>
+            <input id="filter-search" type="text" placeholder="Rechercher patient..." class="text-sm border border-slate-200 rounded-lg px-3 py-1.5 w-48"/>
+          </div>
+        </div>
+        <div id="devis-list" class="divide-y divide-slate-100">
+          <div class="p-12 text-center text-slate-400">
+            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" class="mx-auto mb-3 opacity-30"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+            <p class="font-medium">Aucun devis enregistré.</p>
+            <p class="text-sm mt-1">Commence par cliquer sur "Nouveau devis" en haut.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- VIEW: NEW DEVIS -->
+    <section id="view-new" class="view">
+      <div class="mb-8">
+        <h1 class="text-2xl font-bold text-slate-900 mb-1">Nouveau devis</h1>
+        <p class="text-slate-500 text-sm">Capture d'écran de la fiche patient → mail prêt à envoyer.</p>
+      </div>
+
+      <!-- Steps indicator -->
+      <div class="flex items-center justify-center gap-2 mb-8">
+        <div class="flex items-center gap-2">
+          <div id="step-1-indicator" class="w-8 h-8 rounded-full step-active flex items-center justify-center font-bold text-sm">1</div>
+          <span class="text-sm font-medium text-slate-700">Capture</span>
+        </div>
+        <div class="w-12 h-0.5 bg-slate-200"></div>
+        <div class="flex items-center gap-2">
+          <div id="step-2-indicator" class="w-8 h-8 rounded-full step-todo flex items-center justify-center font-bold text-sm">2</div>
+          <span class="text-sm font-medium text-slate-500">Détails</span>
+        </div>
+        <div class="w-12 h-0.5 bg-slate-200"></div>
+        <div class="flex items-center gap-2">
+          <div id="step-3-indicator" class="w-8 h-8 rounded-full step-todo flex items-center justify-center font-bold text-sm">3</div>
+          <span class="text-sm font-medium text-slate-500">Mail</span>
+        </div>
+      </div>
+
+      <!-- Step 1: Capture -->
+      <div id="step-1" class="bg-white rounded-xl border border-slate-200 p-6">
+        <h2 class="font-bold text-slate-900 mb-2">1. Capture la fiche patient depuis Logos</h2>
+        <p class="text-sm text-slate-500 mb-4">Sur Windows : appuie sur <kbd class="px-2 py-0.5 bg-slate-100 border border-slate-200 rounded text-xs font-mono">Win</kbd> + <kbd class="px-2 py-0.5 bg-slate-100 border border-slate-200 rounded text-xs font-mono">Maj</kbd> + <kbd class="px-2 py-0.5 bg-slate-100 border border-slate-200 rounded text-xs font-mono">S</kbd> pour capturer la fiche, puis colle ici avec <kbd class="px-2 py-0.5 bg-slate-100 border border-slate-200 rounded text-xs font-mono">Ctrl</kbd> + <kbd class="px-2 py-0.5 bg-slate-100 border border-slate-200 rounded text-xs font-mono">V</kbd>.</p>
+
+        <div id="paste-zone" class="paste-zone rounded-xl flex flex-col items-center justify-center text-center p-8 cursor-pointer">
+          <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="1.5" class="mb-3"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+          <p class="font-medium text-slate-700">Colle la capture ici (Ctrl+V)</p>
+          <p class="text-sm text-slate-500 mt-1">ou glisse-dépose une image / clique pour parcourir</p>
+          <input type="file" id="file-input" accept="image/*" class="hidden">
+        </div>
+
+        <div id="image-preview" class="hidden mt-4">
+          <div class="relative inline-block">
+            <img id="preview-img" class="max-h-64 rounded-lg border border-slate-200" alt="Aperçu">
+            <button id="remove-image" class="absolute -top-2 -right-2 bg-white border border-slate-200 rounded-full w-7 h-7 flex items-center justify-center hover:bg-rose-50 hover:border-rose-200">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#64748b" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
+          </div>
+          <div class="mt-4">
+            <button id="extract-btn" class="px-5 py-2.5 bg-indigo-600 text-white rounded-lg font-medium hover:bg-indigo-700 inline-flex items-center gap-2">
+              <span id="extract-btn-text">Extraire les infos patient</span>
+              <span id="extract-spinner" class="spinner hidden"></span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Step 2: Patient details + soins -->
+      <div id="step-2" class="hidden bg-white rounded-xl border border-slate-200 p-6 mt-4">
+        <h2 class="font-bold text-slate-900 mb-2">2. Vérifie les infos et précise les soins</h2>
+        <p class="text-sm text-slate-500 mb-4">Corrige si besoin, puis ajoute le type de soins et tes notes.</p>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+          <div>
+            <label class="text-sm font-medium text-slate-700 block mb-1">Prénom</label>
+            <input id="patient-prenom" type="text" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-indigo-500"/>
+          </div>
+          <div>
+            <label class="text-sm font-medium text-slate-700 block mb-1">Nom</label>
+            <input id="patient-nom" type="text" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-indigo-500"/>
+          </div>
+          <div>
+            <label class="text-sm font-medium text-slate-700 block mb-1">Email</label>
+            <input id="patient-email" type="email" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-indigo-500"/>
+          </div>
+          <div>
+            <label class="text-sm font-medium text-slate-700 block mb-1">Téléphone <span class="text-slate-400 font-normal">(optionnel)</span></label>
+            <input id="patient-tel" type="tel" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-indigo-500"/>
+          </div>
+        </div>
+
+        <div class="border-t border-slate-100 pt-4 mt-2">
+          <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+            <div class="md:col-span-2">
+              <label class="text-sm font-medium text-slate-700 block mb-1">Type de soins / mots-clés</label>
+              <input id="soins-type" type="text" placeholder="ex: couronne 26, détartrage, racine 36" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-indigo-500"/>
+            </div>
+            <div>
+              <label class="text-sm font-medium text-slate-700 block mb-1">Montant € <span class="text-slate-400 font-normal">(optionnel)</span></label>
+              <input id="soins-montant" type="number" placeholder="ex: 850" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-indigo-500"/>
+            </div>
+          </div>
+          <div>
+            <label class="text-sm font-medium text-slate-700 block mb-1">Notes complémentaires <span class="text-slate-400 font-normal">(optionnel)</span></label>
+            <textarea id="soins-notes" rows="2" placeholder="ex: patient anxieux, prévoir sédation, à revoir dans 2 semaines pour..." class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-indigo-500"></textarea>
+          </div>
+        </div>
+
+        <div class="mt-5 flex gap-3">
+          <button id="generate-mail-btn" class="px-5 py-2.5 bg-indigo-600 text-white rounded-lg font-medium hover:bg-indigo-700 inline-flex items-center gap-2">
+            <span id="gen-btn-text">Générer le mail</span>
+            <span id="gen-spinner" class="spinner hidden"></span>
+          </button>
+          <button id="back-to-step1" class="px-5 py-2.5 bg-white border border-slate-200 text-slate-600 rounded-lg font-medium hover:bg-slate-50">
+            Retour
+          </button>
+        </div>
+      </div>
+
+      <!-- Step 3: Mail preview -->
+      <div id="step-3" class="hidden bg-white rounded-xl border border-slate-200 p-6 mt-4">
+        <h2 class="font-bold text-slate-900 mb-2">3. Mail prêt — copie et colle dans Logos</h2>
+        <p class="text-sm text-slate-500 mb-4">Le devis est déjà attaché par Logos. Tu n'as qu'à coller ce texte dans la fenêtre mail.</p>
+
+        <div class="mb-3">
+          <label class="text-sm font-medium text-slate-700 block mb-1">Objet</label>
+          <input id="mail-subject" type="text" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-indigo-500"/>
+        </div>
+
+        <div class="mb-3">
+          <label class="text-sm font-medium text-slate-700 block mb-1">Corps du mail (éditable)</label>
+          <textarea id="mail-body" rows="14" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-indigo-500 font-sans"></textarea>
+        </div>
+
+        <div class="flex flex-wrap gap-3">
+          <button id="copy-mail-btn" class="px-5 py-2.5 bg-indigo-600 text-white rounded-lg font-medium hover:bg-indigo-700 inline-flex items-center gap-2">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+            Copier le texte du mail
+          </button>
+          <button id="regen-mail-btn" class="px-5 py-2.5 bg-white border border-slate-200 text-slate-700 rounded-lg font-medium hover:bg-slate-50 inline-flex items-center gap-2">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>
+            Regénérer
+          </button>
+          <button id="save-devis-btn" class="px-5 py-2.5 bg-emerald-600 text-white rounded-lg font-medium hover:bg-emerald-700 inline-flex items-center gap-2">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+            Enregistrer comme envoyé
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- VIEW: SETTINGS -->
+    <section id="view-settings" class="view">
+      <div class="mb-8">
+        <h1 class="text-2xl font-bold text-slate-900 mb-1">Paramètres</h1>
+        <p class="text-slate-500 text-sm">Configure ta clé Gemini, tes prompts et tes infos cabinet.</p>
+      </div>
+
+      <!-- API Key -->
+      <div class="bg-white rounded-xl border border-slate-200 p-6 mb-4">
+        <h2 class="font-bold text-slate-900 mb-2">Clé API Gemini</h2>
+        <p class="text-sm text-slate-500 mb-4">
+          Récupère ta clé sur <a href="https://aistudio.google.com/apikey" target="_blank" class="text-indigo-600 hover:underline">aistudio.google.com/apikey</a>.
+          <span class="text-amber-700 font-medium">⚠ Active impérativement la facturation</span> dans Google Cloud Console pour que tes données patient ne soient pas utilisées pour entraîner les modèles.
+        </p>
+        <input id="setting-api-key" type="password" placeholder="AIza..." class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-indigo-500 font-mono"/>
+      </div>
+
+      <!-- Cabinet info -->
+      <div class="bg-white rounded-xl border border-slate-200 p-6 mb-4">
+        <h2 class="font-bold text-slate-900 mb-2">Infos cabinet (utilisées dans les mails)</h2>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+          <div>
+            <label class="text-sm font-medium text-slate-700 block mb-1">Ton nom (Dr ...)</label>
+            <input id="setting-doctor-name" type="text" placeholder="Dr Sohaib Kebieche" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm"/>
+          </div>
+          <div>
+            <label class="text-sm font-medium text-slate-700 block mb-1">Nom du cabinet</label>
+            <input id="setting-cabinet-name" type="text" placeholder="Cabinet dentaire ..." class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm"/>
+          </div>
+          <div>
+            <label class="text-sm font-medium text-slate-700 block mb-1">Téléphone cabinet</label>
+            <input id="setting-cabinet-phone" type="text" placeholder="01 XX XX XX XX" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm"/>
+          </div>
+          <div>
+            <label class="text-sm font-medium text-slate-700 block mb-1">Délai relance (jours)</label>
+            <input id="setting-relance-days" type="number" min="1" max="60" value="18" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm"/>
+          </div>
+        </div>
+      </div>
+
+      <!-- Prompts -->
+      <div class="bg-white rounded-xl border border-slate-200 p-6 mb-4">
+        <h2 class="font-bold text-slate-900 mb-2">Prompts Gemini personnalisés</h2>
+        <p class="text-sm text-slate-500 mb-4">
+          Variables disponibles : <code class="text-xs bg-slate-100 px-1 rounded">{{prenom}}</code> <code class="text-xs bg-slate-100 px-1 rounded">{{nom}}</code> <code class="text-xs bg-slate-100 px-1 rounded">{{soins}}</code> <code class="text-xs bg-slate-100 px-1 rounded">{{notes}}</code> <code class="text-xs bg-slate-100 px-1 rounded">{{montant}}</code> <code class="text-xs bg-slate-100 px-1 rounded">{{doctor}}</code> <code class="text-xs bg-slate-100 px-1 rounded">{{cabinet}}</code> <code class="text-xs bg-slate-100 px-1 rounded">{{phone}}</code> <code class="text-xs bg-slate-100 px-1 rounded">{{date_envoi}}</code>
+        </p>
+        <div class="mb-4">
+          <label class="text-sm font-medium text-slate-700 block mb-1">Prompt mail initial (avec devis)</label>
+          <textarea id="setting-prompt-initial" rows="10" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm font-mono"></textarea>
+        </div>
+        <div>
+          <label class="text-sm font-medium text-slate-700 block mb-1">Prompt mail de relance</label>
+          <textarea id="setting-prompt-relance" rows="10" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm font-mono"></textarea>
+        </div>
+      </div>
+
+      <!-- Data management -->
+      <div class="bg-white rounded-xl border border-slate-200 p-6 mb-4">
+        <h2 class="font-bold text-slate-900 mb-2">Données</h2>
+        <p class="text-sm text-slate-500 mb-4">Toutes tes données sont stockées <strong>localement dans ton navigateur</strong> (IndexedDB). Aucun serveur. Pense à exporter régulièrement.</p>
+        <div class="flex flex-wrap gap-3">
+          <button id="export-data-btn" class="px-4 py-2 bg-slate-700 text-white rounded-lg text-sm font-medium hover:bg-slate-800">Exporter (JSON)</button>
+          <button id="export-csv-btn" class="px-4 py-2 bg-slate-700 text-white rounded-lg text-sm font-medium hover:bg-slate-800">Exporter (CSV)</button>
+          <button id="import-data-btn" class="px-4 py-2 bg-white border border-slate-200 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50">Importer</button>
+          <input type="file" id="import-file" accept=".json" class="hidden">
+          <button id="reset-data-btn" class="px-4 py-2 bg-rose-50 border border-rose-200 text-rose-700 rounded-lg text-sm font-medium hover:bg-rose-100">Tout effacer</button>
+        </div>
+      </div>
+
+      <div class="flex gap-3">
+        <button id="save-settings-btn" class="px-5 py-2.5 bg-indigo-600 text-white rounded-lg font-medium hover:bg-indigo-700">Enregistrer les paramètres</button>
+      </div>
+    </section>
+
+    <!-- VIEW: DETAIL -->
+    <section id="view-detail" class="view">
+      <button id="back-to-dashboard" class="text-sm text-slate-500 hover:text-slate-900 mb-4 inline-flex items-center gap-1">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
+        Retour au tableau de bord
+      </button>
+      <div id="detail-content"></div>
+    </section>
+
+  </main>
+
+  <div id="toast-container"></div>
+
+  <script>
+  // ========================================
+  // DATABASE
+  // ========================================
+  const db = new Dexie('MelyiaDB');
+  db.version(1).stores({
+    devis: '++id, patient_nom, patient_email, status, date_envoi, date_relance_prevue, montant',
+    relances: '++id, devis_id, date'
+  });
+
+  // ========================================
+  // SETTINGS
+  // ========================================
+  const DEFAULT_PROMPT_INITIAL = `Tu es l'assistant de {{doctor}}, chirurgien-dentiste au {{cabinet}}.
+
+Rédige le corps d'un mail à envoyer à {{prenom}} {{nom}} à la suite de sa consultation. Le devis est déjà joint au mail (par notre logiciel).
+
+Soins concernés : {{soins}}
+Notes complémentaires du praticien : {{notes}}
+
+Le mail doit :
+- Commencer par "Bonjour {{prenom}},"
+- Remercier {{prenom}} de sa visite
+- Indiquer que le devis détaillé est en pièce jointe
+- Expliquer SIMPLEMENT (sans jargon) les soins prévus, en quoi ils consistent et leur intérêt
+- Si pertinent, expliquer pourquoi ces soins sont recommandés
+- Inviter à poser toutes les questions avant de prendre rendez-vous
+- Terminer chaleureusement par une signature : {{doctor}}, {{cabinet}}, {{phone}}
+
+Ton : chaleureux, pédagogique, rassurant, jamais commercial. Phrases courtes. Pas de jargon technique.
+
+Réponds UNIQUEMENT avec le corps du mail (pas d'objet, pas de "Voici le mail :", juste le texte du mail).`;
+
+  const DEFAULT_PROMPT_RELANCE = `Tu es l'assistant de {{doctor}}, chirurgien-dentiste au {{cabinet}}.
+
+Rédige le corps d'un mail de relance bienveillante à {{prenom}} {{nom}}, qui a reçu un devis le {{date_envoi}} pour les soins suivants : {{soins}}, et qui n'a pas encore pris rendez-vous.
+
+Le mail doit :
+- Commencer par "Bonjour {{prenom}},"
+- Mentionner sans insister le devis envoyé pour les soins prévus
+- Demander gentiment s'il/elle a des questions ou besoin de précisions
+- Proposer un échange (téléphone, mail) ou une prise de rendez-vous quand cela lui conviendra
+- NE JAMAIS être commercial, insistant ou alarmiste (déontologie ONCD : pas de racolage)
+- Rester court (5-8 lignes maximum)
+- Signer par : {{doctor}}, {{cabinet}}, {{phone}}
+
+Ton : à l'écoute, bienveillant, professionnel.
+
+Réponds UNIQUEMENT avec le corps du mail.`;
+
+  const DEFAULT_PROMPT_EXTRACT = `Tu es un assistant qui analyse une capture d'écran d'une fiche patient depuis un logiciel dentaire (probablement Logos).
+
+Extrais les informations suivantes au format JSON STRICT, sans aucun texte avant ou après le JSON :
+
+{
+  "prenom": "prénom du patient (string ou null)",
+  "nom": "nom de famille (string ou null)",
+  "email": "adresse email si visible (string ou null)",
+  "telephone": "numéro de téléphone si visible, formaté en chiffres avec espaces (string ou null)"
+}
+
+Règles :
+- Si une info n'est pas visible ou peu fiable, mets null
+- Pour le nom, mets le nom de famille SEUL (pas "Mme NOM Prénom")
+- Pour le prénom, mets juste le prénom (avec majuscule)
+- Pour l'email, vérifie qu'il y a un @ et un point
+- Réponds UNIQUEMENT avec le JSON, RIEN d'autre, pas de markdown, pas de code fence`;
+
+  function getSetting(key, fallback) {
+    const v = localStorage.getItem('melyia_' + key);
+    return v !== null ? v : fallback;
+  }
+  function setSetting(key, value) {
+    localStorage.setItem('melyia_' + key, value);
+  }
+
+  // ========================================
+  // GEMINI API
+  // ========================================
+  async function geminiCall(parts) {
+    const apiKey = getSetting('apiKey', '');
+    if (!apiKey) {
+      throw new Error('Clé API Gemini manquante. Va dans Paramètres pour l\'ajouter.');
+    }
+    const model = 'gemini-2.5-flash';
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{ parts }],
+        generationConfig: { temperature: 0.7, maxOutputTokens: 2048 }
+      })
+    });
+
+    if (!response.ok) {
+      const err = await response.text();
+      throw new Error(`Erreur Gemini (${response.status}): ${err.substring(0, 200)}`);
+    }
+    const data = await response.json();
+    if (!data.candidates || !data.candidates[0]) {
+      throw new Error('Réponse Gemini vide ou bloquée par les filtres de sécurité.');
+    }
+    return data.candidates[0].content.parts[0].text;
+  }
+
+  async function extractPatientFromImage(base64Image, mimeType) {
+    const promptText = getSetting('promptExtract', DEFAULT_PROMPT_EXTRACT);
+    const text = await geminiCall([
+      { text: promptText },
+      { inlineData: { mimeType: mimeType, data: base64Image } }
+    ]);
+    let cleaned = text.trim();
+    if (cleaned.startsWith('```')) {
+      cleaned = cleaned.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '');
+    }
+    try {
+      return JSON.parse(cleaned);
+    } catch (e) {
+      const match = cleaned.match(/\{[\s\S]*\}/);
+      if (match) return JSON.parse(match[0]);
+      throw new Error('Gemini a renvoyé une réponse non-JSON : ' + cleaned.substring(0, 100));
+    }
+  }
+
+  function fillPrompt(template, vars) {
+    let out = template;
+    for (const [key, val] of Object.entries(vars)) {
+      out = out.replaceAll('{{' + key + '}}', val || '');
+    }
+    return out;
+  }
+
+  async function generateMailInitial(vars) {
+    const promptTemplate = getSetting('promptInitial', DEFAULT_PROMPT_INITIAL);
+    const fullPrompt = fillPrompt(promptTemplate, vars);
+    const text = await geminiCall([{ text: fullPrompt }]);
+    return text.trim();
+  }
+
+  async function generateMailRelance(vars) {
+    const promptTemplate = getSetting('promptRelance', DEFAULT_PROMPT_RELANCE);
+    const fullPrompt = fillPrompt(promptTemplate, vars);
+    const text = await geminiCall([{ text: fullPrompt }]);
+    return text.trim();
+  }
+
+  // ========================================
+  // UTILITIES
+  // ========================================
+  function toast(message, type = 'info') {
+    const colors = {
+      info: 'bg-slate-800 text-white',
+      success: 'bg-emerald-600 text-white',
+      error: 'bg-rose-600 text-white',
+      warning: 'bg-amber-500 text-white'
+    };
+    const el = document.createElement('div');
+    el.className = 'toast ' + colors[type];
+    el.textContent = message;
+    document.getElementById('toast-container').appendChild(el);
+    setTimeout(() => {
+      el.style.opacity = '0';
+      el.style.transition = 'opacity 0.3s';
+      setTimeout(() => el.remove(), 300);
+    }, type === 'error' ? 6000 : 3500);
+  }
+
+  function fileToBase64(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const base64 = reader.result.split(',')[1];
+        resolve({ base64, mimeType: file.type });
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+  }
+
+  function formatDate(d) {
+    if (!d) return '—';
+    const date = new Date(d);
+    return date.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+  }
+
+  function daysSince(d) {
+    if (!d) return 0;
+    const diff = Date.now() - new Date(d).getTime();
+    return Math.floor(diff / (1000 * 60 * 60 * 24));
+  }
+
+  function addDays(date, days) {
+    const d = new Date(date);
+    d.setDate(d.getDate() + days);
+    return d.toISOString();
+  }
+
+  function statusBadge(status) {
+    const map = {
+      'En attente': 'badge badge-pending',
+      'Relance due': 'badge badge-relance',
+      'Accepté': 'badge badge-accepted',
+      'Refusé': 'badge badge-refused',
+      'Sans réponse': 'badge badge-noresponse'
+    };
+    return `<span class="${map[status] || 'badge badge-pending'}">${status}</span>`;
+  }
+
+  // ========================================
+  // NAVIGATION
+  // ========================================
+  function navigate(view, params = {}) {
+    document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+    document.querySelectorAll('.nav-link').forEach(n => n.classList.remove('active'));
+    document.getElementById('view-' + view).classList.add('active');
+    const navLink = document.querySelector(`.nav-link[data-view="${view}"]`);
+    if (navLink) navLink.classList.add('active');
+    window.scrollTo(0, 0);
+
+    if (view === 'dashboard') renderDashboard();
+    if (view === 'new') resetNewDevis();
+    if (view === 'settings') renderSettings();
+    if (view === 'detail') renderDetail(params.id);
+  }
+
+  // ========================================
+  // STATE FOR NEW DEVIS FLOW
+  // ========================================
+  let currentImage = null;
+  let currentExtraction = null;
+
+  function setStep(step) {
+    document.getElementById('step-1').classList.toggle('hidden', step !== 1 && step !== 'all');
+    document.getElementById('step-2').classList.toggle('hidden', step < 2);
+    document.getElementById('step-3').classList.toggle('hidden', step < 3);
+
+    for (let i = 1; i <= 3; i++) {
+      const ind = document.getElementById(`step-${i}-indicator`);
+      ind.classList.remove('step-active', 'step-done', 'step-todo');
+      if (i < step) ind.classList.add('step-done');
+      else if (i === step) ind.classList.add('step-active');
+      else ind.classList.add('step-todo');
+    }
+  }
+
+  function resetNewDevis() {
+    currentImage = null;
+    currentExtraction = null;
+    document.getElementById('image-preview').classList.add('hidden');
+    document.getElementById('paste-zone').classList.remove('hidden');
+    document.getElementById('preview-img').src = '';
+    document.getElementById('patient-prenom').value = '';
+    document.getElementById('patient-nom').value = '';
+    document.getElementById('patient-email').value = '';
+    document.getElementById('patient-tel').value = '';
+    document.getElementById('soins-type').value = '';
+    document.getElementById('soins-montant').value = '';
+    document.getElementById('soins-notes').value = '';
+    document.getElementById('mail-subject').value = '';
+    document.getElementById('mail-body').value = '';
+    setStep(1);
+  }
+
+  // ========================================
+  // STEP 1: IMAGE CAPTURE & EXTRACT
+  // ========================================
+  function handleImageFile(file) {
+    if (!file || !file.type.startsWith('image/')) {
+      toast('Merci de coller une image (capture d\'écran)', 'warning');
+      return;
+    }
+    currentImage = file;
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      document.getElementById('preview-img').src = e.target.result;
+      document.getElementById('image-preview').classList.remove('hidden');
+      document.getElementById('paste-zone').classList.add('hidden');
+    };
+    reader.readAsDataURL(file);
+  }
+
+  document.addEventListener('paste', (e) => {
+    if (!document.getElementById('view-new').classList.contains('active')) return;
+    if (document.activeElement && ['INPUT', 'TEXTAREA'].includes(document.activeElement.tagName)) return;
+    const items = e.clipboardData?.items || [];
+    for (const item of items) {
+      if (item.type.startsWith('image/')) {
+        const file = item.getAsFile();
+        handleImageFile(file);
+        e.preventDefault();
+        return;
+      }
+    }
+  });
+
+  document.getElementById('paste-zone').addEventListener('click', () => {
+    document.getElementById('file-input').click();
+  });
+
+  document.getElementById('file-input').addEventListener('change', (e) => {
+    if (e.target.files[0]) handleImageFile(e.target.files[0]);
+  });
+
+  ['dragenter', 'dragover'].forEach(ev => {
+    document.getElementById('paste-zone').addEventListener(ev, (e) => {
+      e.preventDefault();
+      document.getElementById('paste-zone').classList.add('drag-over');
+    });
+  });
+  ['dragleave', 'drop'].forEach(ev => {
+    document.getElementById('paste-zone').addEventListener(ev, (e) => {
+      e.preventDefault();
+      document.getElementById('paste-zone').classList.remove('drag-over');
+    });
+  });
+  document.getElementById('paste-zone').addEventListener('drop', (e) => {
+    if (e.dataTransfer.files[0]) handleImageFile(e.dataTransfer.files[0]);
+  });
+
+  document.getElementById('remove-image').addEventListener('click', () => {
+    currentImage = null;
+    document.getElementById('image-preview').classList.add('hidden');
+    document.getElementById('paste-zone').classList.remove('hidden');
+  });
+
+  document.getElementById('extract-btn').addEventListener('click', async () => {
+    if (!currentImage) return;
+    const btn = document.getElementById('extract-btn');
+    const text = document.getElementById('extract-btn-text');
+    const spinner = document.getElementById('extract-spinner');
+    btn.disabled = true;
+    text.textContent = 'Analyse en cours...';
+    spinner.classList.remove('hidden');
+
+    try {
+      const { base64, mimeType } = await fileToBase64(currentImage);
+      const result = await extractPatientFromImage(base64, mimeType);
+      currentExtraction = result;
+      document.getElementById('patient-prenom').value = result.prenom || '';
+      document.getElementById('patient-nom').value = result.nom || '';
+      document.getElementById('patient-email').value = result.email || '';
+      document.getElementById('patient-tel').value = result.telephone || '';
+      setStep(2);
+      toast('Infos extraites — vérifie et complète si besoin', 'success');
+      setTimeout(() => document.getElementById('soins-type').focus(), 100);
+    } catch (e) {
+      toast(e.message, 'error');
+    } finally {
+      btn.disabled = false;
+      text.textContent = 'Extraire les infos patient';
+      spinner.classList.add('hidden');
+    }
+  });
+
+  document.getElementById('back-to-step1').addEventListener('click', () => setStep(1));
+
+  // ========================================
+  // STEP 2: GENERATE MAIL
+  // ========================================
+  async function doGenerateMail() {
+    const vars = {
+      prenom: document.getElementById('patient-prenom').value.trim(),
+      nom: document.getElementById('patient-nom').value.trim(),
+      soins: document.getElementById('soins-type').value.trim(),
+      notes: document.getElementById('soins-notes').value.trim() || '(aucune note particulière)',
+      montant: document.getElementById('soins-montant').value.trim(),
+      doctor: getSetting('doctorName', 'Dr ...'),
+      cabinet: getSetting('cabinetName', ''),
+      phone: getSetting('cabinetPhone', ''),
+      date_envoi: formatDate(new Date())
+    };
+
+    if (!vars.prenom || !vars.nom) {
+      toast('Le nom et prénom sont obligatoires', 'warning');
+      return;
+    }
+    if (!vars.soins) {
+      toast('Indique au moins le type de soins', 'warning');
+      return;
+    }
+
+    const btn = document.getElementById('generate-mail-btn');
+    const text = document.getElementById('gen-btn-text');
+    const spinner = document.getElementById('gen-spinner');
+    btn.disabled = true;
+    text.textContent = 'Génération...';
+    spinner.classList.remove('hidden');
+
+    try {
+      const mail = await generateMailInitial(vars);
+      const subject = `Suite à votre consultation – ${vars.prenom} ${vars.nom}`;
+      document.getElementById('mail-subject').value = subject;
+      document.getElementById('mail-body').value = mail;
+      setStep(3);
+      toast('Mail généré ✓', 'success');
+    } catch (e) {
+      toast(e.message, 'error');
+    } finally {
+      btn.disabled = false;
+      text.textContent = 'Générer le mail';
+      spinner.classList.add('hidden');
+    }
+  }
+
+  document.getElementById('generate-mail-btn').addEventListener('click', doGenerateMail);
+  document.getElementById('regen-mail-btn').addEventListener('click', doGenerateMail);
+
+  // ========================================
+  // STEP 3: COPY & SAVE
+  // ========================================
+  document.getElementById('copy-mail-btn').addEventListener('click', async () => {
+    const subject = document.getElementById('mail-subject').value;
+    const body = document.getElementById('mail-body').value;
+    try {
+      await navigator.clipboard.writeText(body);
+      toast('Texte du mail copié — colle-le dans la fenêtre Logos', 'success');
+    } catch (e) {
+      const ta = document.createElement('textarea');
+      ta.value = body;
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      ta.remove();
+      toast('Texte du mail copié', 'success');
+    }
+  });
+
+  document.getElementById('save-devis-btn').addEventListener('click', async () => {
+    const relanceDays = parseInt(getSetting('relanceDays', '18'));
+    const now = new Date();
+    const devis = {
+      patient_prenom: document.getElementById('patient-prenom').value.trim(),
+      patient_nom: document.getElementById('patient-nom').value.trim(),
+      patient_email: document.getElementById('patient-email').value.trim(),
+      patient_tel: document.getElementById('patient-tel').value.trim(),
+      soins: document.getElementById('soins-type').value.trim(),
+      notes: document.getElementById('soins-notes').value.trim(),
+      montant: parseFloat(document.getElementById('soins-montant').value) || null,
+      mail_subject: document.getElementById('mail-subject').value,
+      mail_body: document.getElementById('mail-body').value,
+      status: 'En attente',
+      date_envoi: now.toISOString(),
+      date_relance_prevue: addDays(now, relanceDays),
+      created_at: now.toISOString()
+    };
+    await db.devis.add(devis);
+    toast('Devis enregistré dans le suivi', 'success');
+    navigate('dashboard');
+  });
+
+  // ========================================
+  // DASHBOARD
+  // ========================================
+  async function renderDashboard() {
+    const all = await db.devis.toArray();
+    const filterStatus = document.getElementById('filter-status').value;
+    const filterSearch = document.getElementById('filter-search').value.toLowerCase();
+
+    // Stats
+    const total = all.length;
+    const pending = all.filter(d => d.status === 'En attente').length;
+    const accepted = all.filter(d => d.status === 'Accepté').length;
+    const refused = all.filter(d => d.status === 'Refusé').length;
+    const treated = accepted + refused;
+    const rate = treated > 0 ? Math.round((accepted / treated) * 100) + '%' : '—';
+    const totalAmount = all.reduce((s, d) => s + (d.montant || 0), 0);
+    const pendingAmount = all.filter(d => d.status === 'En attente').reduce((s, d) => s + (d.montant || 0), 0);
+    const acceptedAmount = all.filter(d => d.status === 'Accepté').reduce((s, d) => s + (d.montant || 0), 0);
+
+    document.getElementById('stat-total').textContent = total;
+    document.getElementById('stat-total-amount').textContent = totalAmount.toLocaleString('fr-FR') + ' €';
+    document.getElementById('stat-pending').textContent = pending;
+    document.getElementById('stat-pending-amount').textContent = pendingAmount.toLocaleString('fr-FR') + ' €';
+    document.getElementById('stat-accepted').textContent = accepted;
+    document.getElementById('stat-accepted-amount').textContent = acceptedAmount.toLocaleString('fr-FR') + ' €';
+    document.getElementById('stat-rate').textContent = rate;
+
+    // Relances dues
+    const now = Date.now();
+    const relancesDues = all.filter(d => d.status === 'En attente' && new Date(d.date_relance_prevue).getTime() <= now);
+    const relancesSection = document.getElementById('relances-section');
+    const navBadge = document.getElementById('nav-relance-badge');
+    if (relancesDues.length > 0) {
+      relancesSection.classList.remove('hidden');
+      navBadge.classList.remove('hidden');
+      navBadge.textContent = relancesDues.length;
+      document.getElementById('relances-count').textContent = relancesDues.length;
+      document.getElementById('relances-list').innerHTML = relancesDues.map(d => `
+        <div class="bg-white rounded-lg p-3 flex items-center justify-between border border-rose-100">
+          <div>
+            <div class="font-medium text-slate-900">${d.patient_prenom} ${d.patient_nom}</div>
+            <div class="text-xs text-slate-500">Devis envoyé ${formatDate(d.date_envoi)} (il y a ${daysSince(d.date_envoi)} jours) — ${d.soins}</div>
+          </div>
+          <div class="flex gap-2">
+            <button class="relance-btn px-3 py-1.5 bg-rose-600 text-white rounded-lg text-sm font-medium hover:bg-rose-700" data-id="${d.id}">Relancer</button>
+            <button class="detail-btn px-3 py-1.5 bg-white border border-slate-200 text-slate-600 rounded-lg text-sm hover:bg-slate-50" data-id="${d.id}">Voir</button>
+          </div>
+        </div>
+      `).join('');
+    } else {
+      relancesSection.classList.add('hidden');
+      navBadge.classList.add('hidden');
+    }
+
+    // Liste devis
+    let filtered = all.slice().sort((a, b) => new Date(b.date_envoi) - new Date(a.date_envoi));
+    if (filterStatus) filtered = filtered.filter(d => d.status === filterStatus);
+    if (filterSearch) filtered = filtered.filter(d =>
+      (d.patient_nom + ' ' + d.patient_prenom + ' ' + (d.patient_email || '')).toLowerCase().includes(filterSearch)
+    );
+
+    const listEl = document.getElementById('devis-list');
+    if (filtered.length === 0) {
+      listEl.innerHTML = `<div class="p-12 text-center text-slate-400">
+        <p class="font-medium">Aucun devis ne correspond à ces filtres.</p>
+      </div>`;
+    } else {
+      listEl.innerHTML = filtered.map(d => {
+        const isRelanceDue = d.status === 'En attente' && new Date(d.date_relance_prevue).getTime() <= now;
+        const displayStatus = isRelanceDue ? 'Relance due' : d.status;
+        return `
+          <div class="p-4 hover:bg-slate-50 cursor-pointer detail-btn" data-id="${d.id}">
+            <div class="flex items-center justify-between">
+              <div class="flex-1">
+                <div class="flex items-center gap-3">
+                  <div class="font-medium text-slate-900">${d.patient_prenom} ${d.patient_nom}</div>
+                  ${statusBadge(displayStatus)}
+                </div>
+                <div class="text-sm text-slate-500 mt-0.5">
+                  ${d.soins} ${d.montant ? '• ' + d.montant.toLocaleString('fr-FR') + ' €' : ''} • Envoyé ${formatDate(d.date_envoi)}
+                </div>
+              </div>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#cbd5e1" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    // Bind events
+    document.querySelectorAll('.detail-btn').forEach(b => {
+      b.addEventListener('click', (e) => {
+        e.stopPropagation();
+        navigate('detail', { id: parseInt(b.dataset.id) });
+      });
+    });
+    document.querySelectorAll('.relance-btn').forEach(b => {
+      b.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        await launchRelance(parseInt(b.dataset.id));
+      });
+    });
+  }
+
+  document.getElementById('filter-status').addEventListener('change', renderDashboard);
+  document.getElementById('filter-search').addEventListener('input', renderDashboard);
+
+  // ========================================
+  // RELANCE FLOW
+  // ========================================
+  async function launchRelance(devisId) {
+    const devis = await db.devis.get(devisId);
+    if (!devis) return;
+
+    toast('Génération du mail de relance...', 'info');
+    try {
+      const vars = {
+        prenom: devis.patient_prenom,
+        nom: devis.patient_nom,
+        soins: devis.soins,
+        notes: devis.notes,
+        montant: devis.montant ? devis.montant.toString() : '',
+        doctor: getSetting('doctorName', 'Dr ...'),
+        cabinet: getSetting('cabinetName', ''),
+        phone: getSetting('cabinetPhone', ''),
+        date_envoi: formatDate(devis.date_envoi)
+      };
+      const relanceMail = await generateMailRelance(vars);
+      const subject = `Suite de votre devis – ${devis.patient_prenom} ${devis.patient_nom}`;
+
+      navigate('detail', { id: devisId });
+      setTimeout(() => {
+        showRelanceModal(devisId, devis, subject, relanceMail);
+      }, 200);
+    } catch (e) {
+      toast(e.message, 'error');
+    }
+  }
+
+  function showRelanceModal(devisId, devis, subject, body) {
+    const gmailUrl = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(devis.patient_email)}&su=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+    const html = `
+      <div class="bg-white rounded-xl border border-slate-200 p-6 mt-4">
+        <h2 class="font-bold text-slate-900 mb-2">Mail de relance pour ${devis.patient_prenom} ${devis.patient_nom}</h2>
+        <p class="text-sm text-slate-500 mb-4">Le mail s'ouvrira dans Gmail prérempli (le devis n'a pas besoin d'être attaché pour une relance).</p>
+        <div class="mb-3">
+          <label class="text-sm font-medium text-slate-700 block mb-1">Objet</label>
+          <input id="relance-subject" type="text" value="${subject.replaceAll('"', '&quot;')}" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm"/>
+        </div>
+        <div class="mb-3">
+          <label class="text-sm font-medium text-slate-700 block mb-1">Corps du mail (éditable)</label>
+          <textarea id="relance-body" rows="14" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm">${body}</textarea>
+        </div>
+        <div class="flex flex-wrap gap-3">
+          <button id="open-gmail-btn" class="px-5 py-2.5 bg-indigo-600 text-white rounded-lg font-medium hover:bg-indigo-700 inline-flex items-center gap-2">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+            Ouvrir dans Gmail
+          </button>
+          <button id="copy-relance-btn" class="px-5 py-2.5 bg-white border border-slate-200 text-slate-700 rounded-lg font-medium hover:bg-slate-50">Copier le texte</button>
+          <button id="mark-relance-sent" class="px-5 py-2.5 bg-emerald-600 text-white rounded-lg font-medium hover:bg-emerald-700">Marquer comme relancé</button>
+        </div>
+      </div>
+    `;
+    const detailContent = document.getElementById('detail-content');
+    detailContent.insertAdjacentHTML('beforeend', html);
+
+    document.getElementById('open-gmail-btn').addEventListener('click', () => {
+      const newSubject = document.getElementById('relance-subject').value;
+      const newBody = document.getElementById('relance-body').value;
+      const url = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(devis.patient_email)}&su=${encodeURIComponent(newSubject)}&body=${encodeURIComponent(newBody)}`;
+      window.open(url, '_blank');
+    });
+    document.getElementById('copy-relance-btn').addEventListener('click', async () => {
+      const newBody = document.getElementById('relance-body').value;
+      await navigator.clipboard.writeText(newBody);
+      toast('Texte copié', 'success');
+    });
+    document.getElementById('mark-relance-sent').addEventListener('click', async () => {
+      const newBody = document.getElementById('relance-body').value;
+      await db.relances.add({
+        devis_id: devisId,
+        date: new Date().toISOString(),
+        body: newBody
+      });
+      const relanceDays = parseInt(getSetting('relanceDays', '18'));
+      await db.devis.update(devisId, { date_relance_prevue: addDays(new Date(), relanceDays) });
+      toast('Relance enregistrée — prochaine prévue dans ' + relanceDays + ' jours', 'success');
+      renderDetail(devisId);
+    });
+  }
+
+  // ========================================
+  // DETAIL VIEW
+  // ========================================
+  async function renderDetail(id) {
+    const devis = await db.devis.get(id);
+    if (!devis) {
+      navigate('dashboard');
+      return;
+    }
+    const relances = await db.relances.where('devis_id').equals(id).toArray();
+    relances.sort((a, b) => new Date(b.date) - new Date(a.date));
+
+    const html = `
+      <div class="bg-white rounded-xl border border-slate-200 p-6 mb-4">
+        <div class="flex items-start justify-between mb-4">
+          <div>
+            <h1 class="text-2xl font-bold text-slate-900">${devis.patient_prenom} ${devis.patient_nom}</h1>
+            <div class="text-sm text-slate-500 mt-1">
+              ${devis.patient_email || ''} ${devis.patient_tel ? '• ' + devis.patient_tel : ''}
+            </div>
+          </div>
+          <div>${statusBadge(devis.status)}</div>
+        </div>
+
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-4 py-4 border-y border-slate-100">
+          <div><div class="text-xs text-slate-500 uppercase">Soins</div><div class="text-sm font-medium mt-1">${devis.soins}</div></div>
+          <div><div class="text-xs text-slate-500 uppercase">Montant</div><div class="text-sm font-medium mt-1">${devis.montant ? devis.montant.toLocaleString('fr-FR') + ' €' : '—'}</div></div>
+          <div><div class="text-xs text-slate-500 uppercase">Envoyé le</div><div class="text-sm font-medium mt-1">${formatDate(devis.date_envoi)}</div></div>
+          <div><div class="text-xs text-slate-500 uppercase">Relance prévue</div><div class="text-sm font-medium mt-1">${formatDate(devis.date_relance_prevue)}</div></div>
+        </div>
+
+        ${devis.notes ? `<div class="mt-4"><div class="text-xs text-slate-500 uppercase mb-1">Notes</div><div class="text-sm">${devis.notes}</div></div>` : ''}
+
+        <div class="mt-5 flex flex-wrap gap-2">
+          <span class="text-sm text-slate-600 mr-2 self-center">Marquer comme :</span>
+          <button class="status-btn px-3 py-1.5 bg-emerald-50 border border-emerald-200 text-emerald-700 rounded-lg text-sm font-medium hover:bg-emerald-100" data-status="Accepté">Accepté</button>
+          <button class="status-btn px-3 py-1.5 bg-slate-50 border border-slate-200 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-100" data-status="Refusé">Refusé</button>
+          <button class="status-btn px-3 py-1.5 bg-purple-50 border border-purple-200 text-purple-700 rounded-lg text-sm font-medium hover:bg-purple-100" data-status="Sans réponse">Sans réponse</button>
+          <button class="status-btn px-3 py-1.5 bg-amber-50 border border-amber-200 text-amber-700 rounded-lg text-sm font-medium hover:bg-amber-100" data-status="En attente">Remettre en attente</button>
+          <button id="delete-devis-btn" class="px-3 py-1.5 bg-rose-50 border border-rose-200 text-rose-700 rounded-lg text-sm font-medium hover:bg-rose-100 ml-auto">Supprimer</button>
+        </div>
+      </div>
+
+      <div class="bg-white rounded-xl border border-slate-200 p-6 mb-4">
+        <div class="flex items-center justify-between mb-3">
+          <h2 class="font-bold text-slate-900">Historique</h2>
+          <button id="new-relance-btn" class="px-3 py-1.5 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700">+ Nouvelle relance</button>
+        </div>
+        <div class="space-y-3">
+          <div class="border-l-2 border-indigo-500 pl-4 py-1">
+            <div class="text-sm font-medium text-slate-900">Mail initial avec devis envoyé</div>
+            <div class="text-xs text-slate-500">${formatDate(devis.date_envoi)}</div>
+            <details class="mt-2">
+              <summary class="text-xs text-indigo-600 cursor-pointer hover:underline">Voir le contenu</summary>
+              <div class="mail-preview mt-2 text-xs">${(devis.mail_body || '').replace(/</g, '&lt;')}</div>
+            </details>
+          </div>
+          ${relances.map(r => `
+            <div class="border-l-2 border-rose-400 pl-4 py-1">
+              <div class="text-sm font-medium text-slate-900">Relance envoyée</div>
+              <div class="text-xs text-slate-500">${formatDate(r.date)}</div>
+              <details class="mt-2">
+                <summary class="text-xs text-indigo-600 cursor-pointer hover:underline">Voir le contenu</summary>
+                <div class="mail-preview mt-2 text-xs">${(r.body || '').replace(/</g, '&lt;')}</div>
+              </details>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+    `;
+    document.getElementById('detail-content').innerHTML = html;
+
+    document.querySelectorAll('.status-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const newStatus = btn.dataset.status;
+        await db.devis.update(id, { status: newStatus });
+        toast('Statut mis à jour : ' + newStatus, 'success');
+        renderDetail(id);
+      });
+    });
+
+    document.getElementById('new-relance-btn').addEventListener('click', () => launchRelance(id));
+
+    document.getElementById('delete-devis-btn').addEventListener('click', async () => {
+      if (!confirm('Supprimer définitivement ce devis et son historique ?')) return;
+      await db.devis.delete(id);
+      await db.relances.where('devis_id').equals(id).delete();
+      toast('Devis supprimé', 'success');
+      navigate('dashboard');
+    });
+  }
+
+  document.getElementById('back-to-dashboard').addEventListener('click', () => navigate('dashboard'));
+
+  // ========================================
+  // SETTINGS
+  // ========================================
+  function renderSettings() {
+    document.getElementById('setting-api-key').value = getSetting('apiKey', '');
+    document.getElementById('setting-doctor-name').value = getSetting('doctorName', '');
+    document.getElementById('setting-cabinet-name').value = getSetting('cabinetName', '');
+    document.getElementById('setting-cabinet-phone').value = getSetting('cabinetPhone', '');
+    document.getElementById('setting-relance-days').value = getSetting('relanceDays', '18');
+    document.getElementById('setting-prompt-initial').value = getSetting('promptInitial', DEFAULT_PROMPT_INITIAL);
+    document.getElementById('setting-prompt-relance').value = getSetting('promptRelance', DEFAULT_PROMPT_RELANCE);
+  }
+
+  document.getElementById('save-settings-btn').addEventListener('click', () => {
+    setSetting('apiKey', document.getElementById('setting-api-key').value.trim());
+    setSetting('doctorName', document.getElementById('setting-doctor-name').value.trim());
+    setSetting('cabinetName', document.getElementById('setting-cabinet-name').value.trim());
+    setSetting('cabinetPhone', document.getElementById('setting-cabinet-phone').value.trim());
+    setSetting('relanceDays', document.getElementById('setting-relance-days').value || '18');
+    setSetting('promptInitial', document.getElementById('setting-prompt-initial').value);
+    setSetting('promptRelance', document.getElementById('setting-prompt-relance').value);
+    toast('Paramètres enregistrés ✓', 'success');
+  });
+
+  document.getElementById('export-data-btn').addEventListener('click', async () => {
+    const devis = await db.devis.toArray();
+    const relances = await db.relances.toArray();
+    const settings = {};
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k.startsWith('melyia_')) settings[k] = localStorage.getItem(k);
+    }
+    const blob = new Blob([JSON.stringify({ devis, relances, settings, exportedAt: new Date().toISOString() }, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `melyia-export-${new Date().toISOString().slice(0,10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  });
+
+  document.getElementById('export-csv-btn').addEventListener('click', async () => {
+    const devis = await db.devis.toArray();
+    const headers = ['Prenom', 'Nom', 'Email', 'Telephone', 'Soins', 'Montant', 'Statut', 'Date envoi', 'Date relance prevue', 'Notes'];
+    const rows = devis.map(d => [
+      d.patient_prenom, d.patient_nom, d.patient_email, d.patient_tel,
+      d.soins, d.montant || '', d.status,
+      formatDate(d.date_envoi), formatDate(d.date_relance_prevue),
+      (d.notes || '').replace(/[\n\r]/g, ' ')
+    ].map(v => `"${(v || '').toString().replaceAll('"', '""')}"`).join(','));
+    const csv = [headers.join(','), ...rows].join('\n');
+    const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `melyia-devis-${new Date().toISOString().slice(0,10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  });
+
+  document.getElementById('import-data-btn').addEventListener('click', () => document.getElementById('import-file').click());
+  document.getElementById('import-file').addEventListener('change', async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    if (!confirm('Importer écrasera tes données actuelles. Continuer ?')) return;
+    try {
+      const text = await file.text();
+      const data = JSON.parse(text);
+      await db.devis.clear();
+      await db.relances.clear();
+      if (data.devis) await db.devis.bulkAdd(data.devis);
+      if (data.relances) await db.relances.bulkAdd(data.relances);
+      if (data.settings) {
+        for (const [k, v] of Object.entries(data.settings)) localStorage.setItem(k, v);
+      }
+      toast('Import terminé ✓', 'success');
+      navigate('dashboard');
+    } catch (err) {
+      toast('Erreur import : ' + err.message, 'error');
+    }
+  });
+
+  document.getElementById('reset-data-btn').addEventListener('click', async () => {
+    if (!confirm('⚠ Effacer TOUTES les données (devis, relances, paramètres) ? Action irréversible.')) return;
+    if (!confirm('Vraiment sûr ? Pense à exporter d\'abord.')) return;
+    await db.devis.clear();
+    await db.relances.clear();
+    for (let i = localStorage.length - 1; i >= 0; i--) {
+      const k = localStorage.key(i);
+      if (k.startsWith('melyia_')) localStorage.removeItem(k);
+    }
+    toast('Toutes les données effacées', 'success');
+    setTimeout(() => location.reload(), 1000);
+  });
+
+  // ========================================
+  // NAV LINKS
+  // ========================================
+  document.querySelectorAll('.nav-link').forEach(link => {
+    link.addEventListener('click', () => navigate(link.dataset.view));
+  });
+
+  // ========================================
+  // INIT
+  // ========================================
+  async function init() {
+    if (!getSetting('apiKey', '')) {
+      setTimeout(() => {
+        toast('👉 Commence par configurer ta clé API Gemini dans Paramètres', 'warning');
+        navigate('settings');
+      }, 300);
+    } else {
+      navigate('dashboard');
+    }
+  }
+
+  init();
+  </script>
+</body>
+</html>

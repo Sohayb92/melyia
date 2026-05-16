@@ -1,0 +1,22 @@
+# Node
+node_modules/
+
+# Build outputs
+dist-electron/
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editor
+.vscode/
+.idea/
+*.swp
+
+# Old one-shot setup file containing a previously-compromised API key — keep local only
+configurer-cle.html
+
+# Personal context docs (notes, journal) — keep local; remove this line if you want them public
+contexte/

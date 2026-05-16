@@ -1,0 +1,59 @@
+{
+  "name": "melyia",
+  "version": "2.4.0",
+  "description": "Suivi de devis dentaires - app native Windows",
+  "main": "app/main.js",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder --win nsis",
+    "build:installer": "electron-builder --win nsis",
+    "publish": "electron-builder --win nsis --publish always"
+  },
+  "devDependencies": {
+    "electron": "^33.0.2",
+    "electron-builder": "^25.1.8"
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.3"
+  },
+  "build": {
+    "appId": "com.melyia.app",
+    "productName": "Melyia",
+    "directories": {
+      "output": "dist-electron",
+      "buildResources": "app"
+    },
+    "files": [
+      "app/**/*",
+      "!node_modules/electron/**/*",
+      "!node_modules/electron-builder/**/*"
+    ],
+    "extraResources": [
+      "melyia.html",
+      { "from": "vendor", "to": "vendor" }
+    ],
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "Sohayb92",
+        "repo": "melyia"
+      }
+    ],
+    "win": {
+      "target": "nsis",
+      "icon": "app/icon.png",
+      "artifactName": "Melyia-Setup-${version}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "perMachine": false,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Melyia",
+      "uninstallDisplayName": "Melyia",
+      "artifactName": "Melyia-Setup-${version}.${ext}"
+    }
+  }
+}

@@ -1,0 +1,144 @@
+==========================================
+  MELYIA - Suivi de mes devis dentaires
+==========================================
+
+À quoi ça sert :
+- Suivre TES devis envoyés depuis Logos
+- Te dire qui relancer aujourd'hui (vérification Doctolib)
+- Te donner ton vrai taux d'acceptation
+- Calculer ton CA en attente vs signé
+
+Tu continues d'envoyer mails et relances depuis Logos
+(comme avant). Melyia est juste ton tableau de suivi.
+
+Tout est stocké LOCALEMENT dans ton navigateur.
+Aucun serveur, aucune donnée sur internet.
+
+
+==========================================
+  DÉMARRER (2 minutes)
+==========================================
+
+1. Double-clique sur "Ouvrir Melyia.bat"
+   → S'ouvre dans Edge automatiquement
+   → Si Windows affiche une alerte de sécurité :
+     "Informations complémentaires" → "Exécuter quand même"
+
+2. ÉPINGLE l'onglet :
+   - Clic droit sur l'onglet → "Épingler l'onglet"
+   - Comme ça il s'ouvre tout seul au démarrage du navigateur
+
+3. Configure (Paramètres en haut à droite) :
+   - Délai relance : 14 jours (défaut, modifiable)
+   - Délai abandon : 14 jours après relance avant
+     "Sans réponse" suggéré
+   - Active les notifications Windows (recommandé)
+   - Clique "Enregistrer"
+
+
+==========================================
+  WORKFLOW QUOTIDIEN
+==========================================
+
+APRÈS CHAQUE DEVIS ENVOYÉ DEPUIS LOGOS :
+
+1. Tu envoies le devis depuis Logos comme d'habitude
+   (Logos + Gemini, rien ne change)
+
+2. Tu reviens sur Melyia (onglet épinglé)
+   - Clique "Nouveau devis" en haut
+   - OU appuie sur la touche "N" sur le clavier
+   - Tape : prénom, nom, montant, type soins
+     (5 secondes max)
+   - Enregistre
+
+→ Le devis est tracké, relance auto-prévue à J+14
+
+
+CHAQUE MATIN :
+
+1. Tu ouvres Melyia
+2. Si tu as activé les notifications, Windows t'affiche
+   "X patients à vérifier sur Doctolib aujourd'hui"
+3. Sur le tableau de bord, encadré rouge en haut :
+   liste des patients à vérifier
+
+POUR CHAQUE PATIENT À RELANCER :
+- Va sur Doctolib, vérifie s'il a pris RDV
+- SI il a pris RDV → reviens sur Melyia → clique "Accepté"
+  (ou attendre quand tu le vois en consultation)
+- SI il n'a pas pris RDV :
+  - Envoie ta relance depuis Logos (comme d'habitude)
+  - Reviens sur Melyia → clique "Relancé via Logos"
+  → Le système attendra 14 jours de plus, puis te
+    suggérera "Sans réponse"
+
+
+QUAND TU VOIS LE PATIENT EN RDV :
+- Ouvre son devis dans Melyia (clic sur la ligne)
+- Marque "Accepté" / "Refusé" / "Sans réponse"
+
+
+==========================================
+  CE QUE TU GAGNES
+==========================================
+
+- Plus jamais oublier une relance
+- Vue claire de qui en attente / accepté / refusé
+- Taux d'acceptation MENSUEL et annuel
+- CA prévisionnel (en attente) vs signé
+- Export CSV pour ta compta annuelle
+
+
+==========================================
+  IMPORTANT
+==========================================
+
+SAUVEGARDE :
+- Une fois par mois : Paramètres > Exporter JSON
+- Garde ce fichier sur OneDrive ou clé USB
+- Si tu changes de PC, importe ce fichier
+
+CHANGEMENT DE NAVIGATEUR :
+- Tes données sont liées à TON navigateur
+- Si tu vides le cache navigateur → tu perds tout
+- D'où l'importance de l'export régulier
+
+VERSION AVANCÉE :
+- Si tu veux tester l'extraction patient par capture
+  d'écran + génération mail par IA, ouvre :
+  "melyia-avance.html"
+- Plus complet mais demande une clé API Gemini
+- Pour un usage simple, melyia.html (cette version)
+  suffit largement
+
+
+==========================================
+  RACCOURCIS
+==========================================
+
+- Touche "N" : ouvre formulaire nouveau devis
+- Touche "Échap" : ferme les fenêtres
+
+
+==========================================
+  EN CAS DE PROBLÈME
+==========================================
+
+- Le fichier ne s'ouvre pas :
+  → Utilise "Ouvrir Melyia.bat" au lieu du HTML
+  → Ou clic droit sur melyia.html > Ouvrir avec > Edge
+
+- Mes devis ont disparu :
+  → Tu as probablement vidé le cache du navigateur
+  → Ou tu utilises un autre navigateur que d'habitude
+  → Restaure depuis ton dernier export JSON
+
+- Les notifications ne marchent pas :
+  → Va dans Paramètres > Notifications navigateur
+  → Clique pour les activer
+  → Si refusées, va dans les paramètres du navigateur
+    pour autoriser les notifications de cette page
+
+
+Bon usage !
