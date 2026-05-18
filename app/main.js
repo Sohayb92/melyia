@@ -23,6 +23,9 @@ let mainWindow = null;
 let tray = null;
 let isQuitting = false;
 const startHidden = process.argv.includes('--hidden');
+const IS_DEV = !app.isPackaged;
+const APP_TITLE = IS_DEV ? 'Melyia — TEST (DEV) — ne pas utiliser pour de vrais patients' : 'Melyia';
+const TRAY_TOOLTIP = IS_DEV ? 'Melyia TEST (mode dev)' : 'Melyia — Suivi devis';
 
 const HTML_PATH = app.isPackaged
   ? path.join(process.resourcesPath, 'melyia.html')
@@ -44,7 +47,7 @@ function createWindow() {
     height: 900,
     minWidth: 360,
     minHeight: 600,
-    title: 'Melyia',
+    title: APP_TITLE,
     icon: icon,
     autoHideMenuBar: true,
     backgroundColor: '#FAFAFA',
@@ -140,7 +143,7 @@ function createTray() {
     console.error('Tray creation failed:', e);
     return;
   }
-  tray.setToolTip('Melyia — Suivi devis');
+  tray.setToolTip(TRAY_TOOLTIP);
 
   const contextMenu = Menu.buildFromTemplate([
     {
@@ -261,6 +264,7 @@ async function triggerAutoCapture(type = 'patient') {
 ipcMain.handle('app-info', () => ({
   version: app.getVersion(),
   isElectron: true,
+  isDev: IS_DEV,
   platform: process.platform
 }));
 
@@ -285,10 +289,11 @@ ipcMain.handle('set-auto-launch', (e, enabled) => {
 ipcMain.handle('notify-relances', (e, { count, names }) => {
   // Update tray tooltip
   if (tray) {
+    const prefix = IS_DEV ? 'Melyia TEST' : 'Melyia';
     if (count > 0) {
-      tray.setToolTip(`Melyia · ${count} relance${count > 1 ? 's' : ''} à faire aujourd'hui`);
+      tray.setToolTip(`${prefix} · ${count} relance${count > 1 ? 's' : ''} à faire aujourd'hui`);
     } else {
-      tray.setToolTip('Melyia — Suivi devis');
+      tray.setToolTip(TRAY_TOOLTIP);
     }
   }
   // Send Windows notification only if count > 0

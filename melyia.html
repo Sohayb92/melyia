@@ -194,6 +194,12 @@
 </head>
 <body class="bg-ink-50 min-h-screen text-ink-900">
 
+  <!-- Bannière mode TEST (visible uniquement quand l'app tourne en dev via Lancer Melyia TEST.bat) -->
+  <div id="dev-mode-banner" class="hidden" style="position:sticky;top:0;z-index:60;background:#FF9F0A;color:#000;text-align:center;font-weight:600;font-size:13px;padding:6px 12px;letter-spacing:0.02em">
+    🧪 MODE TEST (dossier de données isolé · ne PAS utiliser pour de vrais patients) · base : Melyia-DevTest
+  </div>
+
+
   <!-- Top Navigation (desktop) -->
   <header class="hidden md:block bg-white/80 backdrop-blur-xl border-b border-ink-100 sticky top-0 z-40">
     <div class="max-w-4xl mx-auto px-6 h-12 flex items-center justify-between">
@@ -488,23 +494,35 @@
           <input id="setting-cabinet-email" type="email" placeholder="cabinet@..." class="input !h-9 !w-56 !text-[15px]"/>
         </div>
         <div class="grouped-row block">
-          <div class="text-[15px] font-medium mb-1">Template — 1ère relance (J+21)</div>
-          <div class="text-[13px] text-ink-500 mb-2">Ton bienveillant, vérifie réception. Variables : <code>{{prenom}}</code> <code>{{nom}}</code> <code>{{soins}}</code> <code>{{date_envoi}}</code> <code>{{doctor}}</code></div>
+          <div class="flex items-center justify-between mb-1">
+            <div class="text-[15px] font-medium">Template — 1ère relance (J+21)</div>
+            <button type="button" data-reset-template="relanceTemplate" class="text-[12px] text-accent hover:underline">Réinitialiser</button>
+          </div>
+          <div class="text-[13px] text-ink-500 mb-2">Ton bienveillant, vérifie réception. Variables : <code>{{salutation}}</code> (= « Cher M. Dupont » / « Chère Mme Dupont » / « Bonjour Jean » selon civilité connue) · <code>{{civilite}}</code> (M./Mme) · <code>{{prenom}}</code> · <code>{{nom}}</code> · <code>{{soins}}</code> · <code>{{date_envoi}}</code> · <code>{{doctor}}</code><br>💡 Mets une ligne avec juste <code>---</code> (3 tirets) avant ta signature/diplômes pour qu'ils soient centrés et séparés par un trait fin dans le mail.</div>
           <textarea id="setting-relance-template" rows="8" class="input !text-[13px]"></textarea>
         </div>
         <div class="grouped-row block">
-          <div class="text-[15px] font-medium mb-1">Template — 2ème relance (J+45, soit ~24j après la 1ère)</div>
-          <div class="text-[13px] text-ink-500 mb-2">Dernière prise de contact, ton plus net mais respectueux. Mêmes variables.</div>
+          <div class="flex items-center justify-between mb-1">
+            <div class="text-[15px] font-medium">Template — 2ème relance (J+45, soit ~24j après la 1ère)</div>
+            <button type="button" data-reset-template="relanceTemplate2" class="text-[12px] text-accent hover:underline">Réinitialiser</button>
+          </div>
+          <div class="text-[13px] text-ink-500 mb-2">Dernière prise de contact, ton plus net mais respectueux. Mêmes variables + séparateur signature <code>---</code>.</div>
           <textarea id="setting-relance-template-2" rows="8" class="input !text-[13px]"></textarea>
         </div>
         <div class="grouped-row block">
-          <div class="text-[15px] font-medium mb-1">Prompt « Vulgariser un devis »</div>
+          <div class="flex items-center justify-between mb-1">
+            <div class="text-[15px] font-medium">Prompt « Vulgariser un devis »</div>
+            <button type="button" data-reset-template="vulgarizePrompt" class="text-[12px] text-accent hover:underline">Réinitialiser</button>
+          </div>
           <div class="text-[13px] text-ink-500 mb-2">Pour le mail explicatif initial à coller dans Logos. Variables : <code>{{soins}}</code> <code>{{doctor}}</code><br>Raccourci : <kbd>Ctrl</kbd>+<kbd>Maj</kbd>+<kbd>V</kbd> (depuis n'importe où)</div>
           <textarea id="setting-vulgarize-prompt" rows="8" class="input !text-[13px]"></textarea>
         </div>
         <div class="grouped-row block">
-          <div class="text-[15px] font-medium mb-1">Template — Rappel maintenance (paro / contrôle / implant)</div>
-          <div class="text-[13px] text-ink-500 mb-2">Rappel clinique différencié des relances devis. Inclut la mention « STOP » obligatoire (LCEN). Variables : <code>{{prenom}}</code> <code>{{type_maintenance}}</code> <code>{{doctor}}</code></div>
+          <div class="flex items-center justify-between mb-1">
+            <div class="text-[15px] font-medium">Template — Rappel maintenance (paro / contrôle / implant)</div>
+            <button type="button" data-reset-template="maintenanceTemplate" class="text-[12px] text-accent hover:underline">Réinitialiser</button>
+          </div>
+          <div class="text-[13px] text-ink-500 mb-2">Rappel clinique différencié des relances devis. Inclut la mention « STOP » obligatoire (LCEN). Variables : <code>{{salutation}}</code> · <code>{{civilite}}</code> · <code>{{prenom}}</code> · <code>{{nom}}</code> · <code>{{type_maintenance}}</code> · <code>{{doctor}}</code> + séparateur signature <code>---</code>.</div>
           <textarea id="setting-maintenance-template" rows="8" class="input !text-[13px]"></textarea>
         </div>
       </div>
@@ -912,7 +930,15 @@
 
         <form id="patient-form" class="space-y-3">
           <input type="hidden" id="patient-form-id">
-          <div class="grid grid-cols-2 gap-3">
+          <div class="grid grid-cols-[110px_1fr_1fr] gap-3">
+            <div>
+              <label class="text-[13px] font-medium text-ink-700 block mb-1.5 ml-1">Civilité</label>
+              <select id="patient-form-civilite" class="input">
+                <option value="">— auto —</option>
+                <option value="M">M.</option>
+                <option value="F">Mme</option>
+              </select>
+            </div>
             <div>
               <label class="text-[13px] font-medium text-ink-700 block mb-1.5 ml-1">Prénom</label>
               <input id="patient-form-prenom" type="text" required class="input"/>
@@ -1056,6 +1082,49 @@
   }
 
   // ========================================
+  // CIVILITÉ — détection auto du genre par prénom + override manuel
+  // ========================================
+  const _PRENOMS_M = 'adam adrien alain albert alex alexandre alexis ali amine andre anthony antoine arnaud arthur axel ayoub baptiste basile bastien benjamin benoit bernard bertrand bilal boris bruno bryan cedric charles christian christophe clement corentin cyril damien daniel david denis dimitri dylan edouard eliott emmanuel eric ernest etienne fabien fabrice felix florent florian francis francois frederic gabriel gaetan gaspard georges gerard gilbert gilles gregory guillaume guy hadrien hassan henri herve hubert hugo ibrahim ilias ilyes isaac ismael ivan jacky jacques jamal jean jeremie jeremy jerome joel johan jonathan jordan jose joseph jules julien justin karim kevin kylian laurent leo leon lilian lionel loic louis lucas lucien ludovic mael mahdi malik manuel marc marcel marco mario martin mathias mathieu mathis matteo matthieu maurice maxence maxime mehdi michael michel miguel mohamed morgan moussa nael nathan nicolas noah noe nolan norbert olivier omar oscar pascal patrick paul philippe pierre quentin rachid rafael raphael raymond rayan remi remy renaud rene richard robert robin roger roland romain roman ronan sacha said samir samuel sebastien serge simon stanislas stephane steven sylvain tanguy teddy theo thibault thierry thomas tiago timeo timothee titouan tom tony tristan ugo ulysse valentin victor vincent vladimir wassim wesley william xavier yan yanis yann yannick yassine yoann yohan younes yvan yves zakaria abdel abdelaziz abdelkader abdellah abderrahmane abdou abou abdoul achraf adil ahmad ahmed akram amir anouar anwar ayman aziz badr brahim cheikh dris driss elias fadi fahd farid farouk faycal fethi fouad habib hakim hamed hamid hammou hamza hassen hatem hicham hisham houssam houssem hussein idris idriss ihsan ihssane ilias ilies ilyas ilyes imad ismail ismael issa issam jamel jawad kacem kader kamal kamel khaled khalid khalifa khalil lahcen lotfi mahmoud malek mamadou mansour marouane medhi midou mohammed mokhtar moncef mostafa mounir mourad moustapha muhammad mustafa mustapha nabil nadir nasser nassim nawfal nizar noureddine omran ousmane oussama rabah ramy ramzi redouane reda riad ridha rida rida salah salam salaheddine salem salim samad samy seydou sid sidi slim slimane sofiane sohaib soheib souleymane taha tahar tarek tarik walid yacine yahya yanis yacin youcef younès youness youssef yusuf zaki ziad zied zineddine zinedine aboubacar abdoulaye amadou bakary boubacar cheick demba ibrahima ladji lamine mamoudou modibo moustaph oumar samba sekou tidiane';
+  const _PRENOMS_F = 'adele adeline agathe agnes aicha aida alba alessia alexandra alexia alicia aline alix alma amanda ambre amelia amelie amina anastasia andree angele angelique anita anna anne annick antoinette apolline ariane arielle astrid aude audrey aurelie aurore axelle aya barbara beatrice berenice bernadette bertille blandine brigitte capucine carla carmen carole caroline cassandra catherine cecile celia celine chantal charlene charline charlotte chiara chloe christelle christiane christine claire clara clarisse clemence coline colombe constance coralie corinne cybele cyrielle dalia daniela danielle daphne deborah delphine denise diana diane dorothee edith eleonore eliane elina eline elisa elisabeth elise ella elodie eloise elsa elvire ema emeline emilia emilie emma emmanuelle esther eugenie eulalie eva eve evelyne fabienne fanny farah fatima faustine felicie fiona flavie flora florence francine francoise gabrielle gaelle garance genevieve georgette ghislaine giselle gloria gwendoline gwenaelle hannah hawa helena helene henriette hortense huguette ilona ilyana imane ines ingrid irene iris isabella isabelle jade janine jasmine jeanne jennifer jessica joanne joelle johanna josephine josiane judith julia julie juliette justine karine katia kenza khadija laetitia lana lara laure laurence laurianne lea leila lena leonie liliane lily lina lisa lise livia lola lorena lou louane louise lucette lucie lucile ludivine luna lydia lydie maelys maite manon margaux margot marguerite maria mariam marianne marie marilou marina marine marion marjorie marlene marthe martine maryline maryse mathilde maud maya melanie melina melissa melodie mia mila mina mireille mona monique morgane muriel mylene myriam nadege nadia nadine naelle nancy naomi natacha nathalie nelly nicole noemie nora nour oceane octavie odette odile olga olivia olympe ophelie pamela pascale patricia paula paulette pauline penelope perrine philippa pia priscilla rachel rebecca regine renee rita romane rosa rosalie rose roxane sabine sabrina sakina salima salome samia sandra sandrine sara sarah scarlett segolene severine sibylle sidonie silvia sirine sofia solange solene soline sonia sophia sophie soraya stella stephanie suzanne sybille sylvie tania tatiana tess tessa thais therese tina valentine valeria valerie vanessa veronique victoria virginie viviane wendy yael yamina yasmine yolande yseult yvette yvonne zahra zaina zelie zoe zora aaliyah aliya alya amal amani amira anissa anisse asma assia assya awa ayana bahia bouchra cherazade dalila djamila dounia fadia fadila farida fatma fatouma fatoumata feriel ghania ghizlane habiba hadjira halima hana hanaa hanan hanane hayet hiba hind houda ibtissam imen iness jamila kahina kaltoum karima kawtar khalida khaoula khedidja khira lamia lamiae latifa lila linda loubna lujain mahdia majda malak malika manel maryam meriem meryem meryam moufida mouna mounia mounira nabila nadira nadjet naima najet najia najwa narjis nawal nesrine nezha nina nourhane oumayma oumaima oumou ouafa ourida rabha rachida radia rahma rajaa raja ranya razika rim rima romaissa rkia sabah safa safia safiya saida salwa samira sana saoussen sarra selma siham sihame somaya soraya soukaina soumia soumya soumaya syrine taous thouraya wafa wafaa warda wassila wiam widad yasmina yousra zahia zainab zaynab zineb zohra zoulikha aissata aminata awa aïcha aïchatou binta coumba dieynaba diariata fanta fatou hawa khady mariama miriam ndeye penda rama rokhaya seynabou';
+  const _PRENOMS_M_SET = new Set(_PRENOMS_M.split(' '));
+  const _PRENOMS_F_SET = new Set(_PRENOMS_F.split(' '));
+
+  function _normPrenom(s) {
+    return String(s || '').trim().toLowerCase()
+      .normalize('NFD').replace(/[̀-ͯ]/g, '')
+      .split(/[\s\-']/)[0];
+  }
+  function detectGenderFromPrenom(prenom) {
+    const k = _normPrenom(prenom);
+    if (!k) return null;
+    if (_PRENOMS_M_SET.has(k)) return 'M';
+    if (_PRENOMS_F_SET.has(k)) return 'F';
+    return null;
+  }
+  function civiliteOf(patient) {
+    if (!patient) return null;
+    if (patient.civilite === 'M' || patient.civilite === 'F') return patient.civilite;
+    return detectGenderFromPrenom(patient.prenom);
+  }
+  function titreOf(patient) {
+    const c = civiliteOf(patient);
+    if (c === 'M') return 'M.';
+    if (c === 'F') return 'Mme';
+    return '';
+  }
+  function buildSalutation(patient) {
+    const c = civiliteOf(patient);
+    const nom = ((patient && patient.nom) || '').trim();
+    if (c === 'M' && nom) return `Cher M. ${nom}`;
+    if (c === 'F' && nom) return `Chère Mme ${nom}`;
+    if (c === 'M') return 'Cher Monsieur';
+    if (c === 'F') return 'Chère Madame';
+    // Civilité inconnue : afficher les 2 options, le user supprime la mauvaise avant envoi
+    if (nom) return `Cher M. / Chère Mme ${nom}`;
+    return 'Cher Madame, Cher Monsieur';
+  }
+
+  // ========================================
   // MAINTENANCES HELPERS
   // ========================================
   async function getMaintenancesForPatient(patientId) {
@@ -1114,6 +1183,7 @@
 Extrais les informations au format JSON STRICT, sans texte avant ou après :
 
 {
+  "civilite": "M ou F selon la mention visible (Monsieur/M./Mr → 'M', Madame/Mme/Mlle → 'F'), null sinon",
   "prenom": "prénom du patient (string ou null)",
   "nom": "nom de famille SEUL, sans prénom (string ou null)",
   "email": "adresse email si visible avec @ (string ou null)",
@@ -1122,6 +1192,7 @@ Extrais les informations au format JSON STRICT, sans texte avant ou après :
 
 Règles :
 - Si une info n'est pas visible, mets null
+- Pour la civilité, retourne UNIQUEMENT 'M' ou 'F' (pas 'Monsieur', pas 'Mme')
 - Pour le nom, mets le nom de famille SEUL
 - Pour le prénom, première lettre en majuscule
 - Vérifie qu'un email contient @ et un point
@@ -1195,7 +1266,7 @@ Règles :
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
     const data = await geminiFetchWithRetry(url, {
       contents: [{ parts: [{ text: prompt }] }],
-      generationConfig: { temperature: opts.temperature ?? 0.7, maxOutputTokens: opts.maxOutputTokens ?? 1024 }
+      generationConfig: { temperature: opts.temperature ?? 0.7, maxOutputTokens: opts.maxOutputTokens ?? 4096 }
     });
     if (!data.candidates || !data.candidates[0]) throw new Error('Réponse Gemini vide');
     return data.candidates[0].content.parts[0].text.trim();
@@ -1227,6 +1298,37 @@ Règles :
       el.style.transition = 'all 0.25s';
       setTimeout(() => el.remove(), 250);
     }, 3200);
+  }
+
+  function toastConfirm(message, { confirmLabel = 'Oui', cancelLabel = 'Plus tard', onConfirm, onCancel, durationMs = 10000 } = {}) {
+    const el = document.createElement('div');
+    el.className = 'toast toast-info';
+    el.style.cssText = 'display:flex;align-items:center;gap:10px;padding:12px 14px;max-width:min(540px,92vw)';
+    const msgSpan = document.createElement('span');
+    msgSpan.style.cssText = 'flex:1;font-size:14px';
+    msgSpan.textContent = message;
+    const cancelBtn = document.createElement('button');
+    cancelBtn.textContent = cancelLabel;
+    cancelBtn.style.cssText = 'background:rgba(255,255,255,0.18);color:#fff;border:none;padding:6px 12px;border-radius:8px;font-size:13px;font-weight:500;cursor:pointer';
+    const confirmBtn = document.createElement('button');
+    confirmBtn.textContent = confirmLabel;
+    confirmBtn.style.cssText = 'background:#fff;color:#0A0A0B;border:none;padding:6px 14px;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer';
+    el.appendChild(msgSpan);
+    el.appendChild(cancelBtn);
+    el.appendChild(confirmBtn);
+    document.getElementById('toast-container').appendChild(el);
+    let handled = false;
+    const cleanup = () => {
+      if (handled) return;
+      handled = true;
+      el.style.opacity = '0';
+      el.style.transform = 'translate(-50%, -16px)';
+      el.style.transition = 'all 0.25s';
+      setTimeout(() => el.remove(), 250);
+    };
+    confirmBtn.onclick = () => { cleanup(); if (onConfirm) onConfirm(); };
+    cancelBtn.onclick  = () => { cleanup(); if (onCancel) onCancel(); };
+    setTimeout(() => { if (!handled) { cleanup(); if (onCancel) onCancel(); } }, durationMs);
   }
 
   function formatDate(d) {
@@ -2139,10 +2241,20 @@ Règles :
       const { base64, mimeType } = await fileToBase64(currentPatientCapture);
       const result = await geminiExtract(base64, mimeType);
       let filled = [];
+      if (result.civilite === 'M' || result.civilite === 'F') {
+        document.getElementById('patient-form-civilite').value = result.civilite;
+        filled.push(result.civilite === 'M' ? 'M.' : 'Mme');
+      }
       if (result.prenom) { document.getElementById('patient-form-prenom').value = result.prenom; filled.push('prénom'); }
       if (result.nom)    { document.getElementById('patient-form-nom').value = result.nom; filled.push('nom'); }
       if (result.email)  { document.getElementById('patient-form-email').value = result.email; filled.push('email'); }
       if (result.telephone) { document.getElementById('patient-form-tel').value = result.telephone; filled.push('tel'); }
+      if (!result.civilite && result.prenom) {
+        const auto = detectGenderFromPrenom(result.prenom);
+        if (auto) {
+          document.getElementById('patient-form-civilite').value = auto;
+        }
+      }
       if (filled.length === 0) {
         status.textContent = 'Aucune info extraite — remplis manuellement';
         status.className = 'text-[12px] text-warning mt-2';
@@ -2168,6 +2280,7 @@ Règles :
       editingPatientId = patient.id;
       document.getElementById('patient-modal-title').textContent = 'Modifier le patient';
       document.getElementById('patient-form-id').value = patient.id;
+      document.getElementById('patient-form-civilite').value = (patient.civilite === 'M' || patient.civilite === 'F') ? patient.civilite : '';
       document.getElementById('patient-form-prenom').value = patient.prenom || '';
       document.getElementById('patient-form-nom').value = patient.nom || '';
       document.getElementById('patient-form-email').value = patient.email || '';
@@ -2179,6 +2292,7 @@ Règles :
       document.getElementById('patient-modal-title').textContent = 'Nouveau patient';
       document.getElementById('patient-form').reset();
       document.getElementById('patient-form-id').value = '';
+      document.getElementById('patient-form-civilite').value = '';
     }
     setTimeout(async () => {
       if (!patient && getSetting('apiKey', '')) {
@@ -2241,7 +2355,9 @@ Règles :
     e.preventDefault();
     await withBusyGuard('save-patient', async () => {
     const id = document.getElementById('patient-form-id').value;
+    const civiliteRaw = document.getElementById('patient-form-civilite').value;
     const data = {
+      civilite: (civiliteRaw === 'M' || civiliteRaw === 'F') ? civiliteRaw : null,
       prenom: document.getElementById('patient-form-prenom').value.trim(),
       nom: document.getElementById('patient-form-nom').value.trim(),
       email: document.getElementById('patient-form-email').value.trim(),
@@ -2286,9 +2402,11 @@ Règles :
     if (!id && data.nom) {
       const newPatient = await db.patients.get(savedId);
       setTimeout(() => {
-        if (confirm(`✓ ${newPatient.prenom} ${newPatient.nom} créé.\n\nCréer son premier devis maintenant ?`)) {
-          openModal(null, newPatient);
-        }
+        toastConfirm(`✓ ${newPatient.prenom} ${newPatient.nom} créé. Créer son devis ?`, {
+          confirmLabel: 'Créer le devis',
+          cancelLabel: 'Plus tard',
+          onConfirm: () => openModal(null, newPatient)
+        });
       }, 200);
     }
     });
@@ -2525,71 +2643,145 @@ Règles :
     'controle': { label: 'Contrôle annuel', defaultMonths: 12 }
   };
 
-  const DEFAULT_MAINTENANCE_TEMPLATE = `Bonjour {{prenom}},
+  const DEFAULT_MAINTENANCE_TEMPLATE = `{{salutation}},
 
-Dans le cadre du suivi de votre traitement {{type_maintenance}}, votre prochaine visite de contrôle est recommandée prochainement.
+J'espère que vous allez bien.
 
-Cette visite, prévue dès l'origine de votre plan de traitement, est essentielle pour :
-- contrôler la stabilité des résultats obtenus
-- réaliser le détartrage / nettoyage professionnel adapté
-- détecter précocement toute évolution
+Afin de préserver les bénéfices de vos précédents soins, votre prochaine séance de maintenance parodontale est recommandée prochainement.
 
-Je vous invite à prendre rendez-vous à votre convenance, soit en ligne, soit en contactant le secrétariat du cabinet.
+Pour rappel, la parodontite est une maladie inflammatoire d'origine bactérienne qui touche les tissus de soutien de la dent (la gencive et l'os). Ce rendez-vous de suivi régulier est donc essentiel pour maintenir le bon équilibre de votre bouche.
 
-Si vous ne souhaitez plus recevoir ces rappels de suivi, répondez simplement « STOP » à ce message.
+Il nous permet en effet de :
+- s'assurer de la stabilité de vos gencives
+- réaliser un assainissement professionnel adapté
+- prévenir tout risque de récidive
 
-Bien à vous,
-{{doctor}}`;
+Je vous laisse le soin de planifier ce rendez-vous à votre convenance, directement en ligne ou en contactant le secrétariat du cabinet.
 
-  const DEFAULT_VULGARIZE_PROMPT = `Tu es l'assistant du Dr {{doctor}}, chirurgien-dentiste.
+Bien cordialement,
+{{doctor}}
 
-À partir des actes/mots-clés ci-dessous, rédige le corps d'un mail à envoyer au patient pour expliquer les soins prévus de manière SIMPLE et BIENVEILLANTE (le devis détaillé est joint au mail séparément, pas besoin de le répéter).
+Si vous ne souhaitez plus recevoir ces rappels, répondez simplement « STOP » à ce message.
+
+---
+
+Dr KEBIECHE
+Téléphone : 01 42 42 94 69
+
+Diplômé de l'Université Paris Descartes
+Ancien Praticien Hospitalier en Service de Chirurgie Orale
+D.U d'Implantologie et d'Esthétique dentaire - Université d'Evry
+D.U de parodontologie avancé - Université Côte d'Azur`;
+
+  const DEFAULT_VULGARIZE_PROMPT = `Rôle :
+Tu es l'assistant(e) virtuel(le) et secrétaire médical(e) du Dr KEBIECHE, chirurgien-dentiste. Ton rôle est de rédiger des emails professionnels, cordiaux, clairs et rassurants à destination des patients, pour leur expliquer leur plan de traitement (devis) à partir des notes cliniques abrégées ci-dessous.
 
 Actes / mots-clés : {{soins}}
 
-Le mail doit :
-- Commencer par "Bonjour,"
-- Vulgariser SANS jargon technique (pas de "CCM", "OVL", "HBLD"...)
-- Expliquer en 1-2 phrases l'intérêt de chaque soin
-- Rester court et clair (8-12 lignes max)
-- Inviter à poser des questions
-- Terminer par une signature : {{doctor}}
+Règles de rédaction strictes :
 
-Ton : chaleureux, pédagogique, rassurant. Phrases courtes.
+Nomenclature dentaire : Tu dois toujours écrire les numéros des dents en toutes lettres, accompagnés de leur position. Exemple : "Première molaire en haut à droite (seize)" et JAMAIS "dent 16".
 
-Réponds UNIQUEMENT avec le corps du mail prêt à coller. Pas d'objet, pas de "Voici le mail :", juste le texte.`;
+Parodontite : Dès que je mentionne "paro", "thérapeutique paro" ou "maintenance paro", tu dois obligatoirement inclure une courte introduction pour expliquer ce qu'est la parodontite (maladie inflammatoire d'origine bactérienne touchant les tissus de soutien : gencive et os, entraînant des poches et une perte d'ancrage).
 
-  const DEFAULT_RELANCE_TEMPLATE_1 = `Bonjour {{prenom}},
+Ton et style : Professionnel, factuel, empathique mais sans superlatifs exagérés ("important", "grave", etc.). Le texte doit être aéré avec des titres numérotés et des puces.
 
-Je me permets de revenir vers vous concernant le devis pour {{soins}} que je vous ai remis le {{date_envoi}}.
+Salutation : Commence par "Cher Monsieur [Nom]" si le prénom indique un homme, "Chère Madame [Nom]" si une femme, ou "Cher Madame, Cher Monsieur" si tu n'es pas sûr.
 
-Sans nouvelle de votre part, je voulais m'assurer que vous l'aviez bien reçu et qu'il était suffisamment clair. Je sais que ce type de décision demande souvent un temps de réflexion, et il est important de prendre ce temps — notamment pour échanger avec votre complémentaire santé sur le niveau de prise en charge.
+Glossaire de vulgarisation :
+- Thérapeutique paro : Phase d'assainissement sous-gingival en profondeur pour retirer le tartre et la plaque bactérienne. Préciser que lors de ces séances, nous calibrerons les brossettes interdentaires et que le patient doit ramener sa propre brosse à dents au cabinet.
+- Maintenance paro : Séances de contrôle et de nettoyage régulières pour maintenir l'équilibre de la bouche et éviter les récidives.
+- Avulsion : Extraction de la dent.
+- Comblement osseux : Étape chirurgicale permettant de préserver le volume de l'os de la mâchoire (qui a tendance à se résorber après la perte d'une dent).
+- Implant : Remplacement de la racine de la dent. Nécessite toujours une période de cicatrisation (généralement 3 à 4 mois) avant la pose de la couronne.
+- Onlay / Overlay : Pièce en céramique fabriquée sur mesure qui vient s'imbriquer dans/sur la dent pour reconstruire le volume perdu de manière solide, esthétique et pérenne (suite à une carie ou un vieil amalgame infiltré).
+- RTE (Reprise de Traitement Endodontique) / Endo : Reprise du traitement canalaire pour désinfecter minutieusement le réseau de racines.
+- LIPOE volumineux : Lésion Inflammatoire Péri-Radiculaire d'Origine Endodontique (infection osseuse au bout de la racine). Nécessite un nettoyage (RTE), la pose d'une couronne provisoire et une mise en observation stricte de 6 mois pour valider la cicatrisation osseuse à la radio avant la couronne définitive.
 
-Si vous avez la moindre question sur le plan de traitement, les alternatives possibles ou les modalités, je reste à votre disposition pour en discuter, soit par retour de mail, soit lors d'un échange au cabinet.
+EXEMPLE DE RÉFÉRENCE POUR LE STYLE
 
-Bien à vous,
-{{doctor}}`;
+Exemple : Parodontie et Implants
+Mes notes : M. Dupont, thérapeutique paro + maintenance + avulsion 35 + comblement + implant 35.
 
-  const DEFAULT_RELANCE_TEMPLATE_2 = `Bonjour {{prenom}},
+Ta réponse :
 
-N'ayant pas eu de retour suite à mon précédent message, je me permets une dernière prise de contact concernant le devis pour {{soins}}.
+Cher Monsieur Dupont,
 
-Plusieurs situations sont possibles : vous avez peut-être décidé de reporter les soins, de consulter ailleurs, ou simplement les démarches vous prennent du temps. Toutes ces réponses sont parfaitement légitimes et n'appellent aucune justification de votre part.
+Suite à notre consultation, je vous adresse le détail de votre plan de traitement.
 
-Pour ma part, afin de tenir mon planning à jour, je vous proposerais de me répondre simplement par "intéressé" ou "non concerné" — cela me permettra de classer votre dossier correctement. Sans réponse, je considérerai le devis comme non poursuivi, étant entendu qu'il reste valable et que vous pourrez me recontacter à tout moment.
+1. Prise en charge parodontale
 
-Je vous remercie pour votre confiance,
-{{doctor}}`;
+Lors de notre examen clinique, nous avons diagnostiqué une parodontite. Il s'agit d'une maladie inflammatoire d'origine bactérienne qui touche le parodonte, c'est-à-dire l'ensemble des tissus de soutien de vos dents (la gencive et l'os sous-jacent). Cette pathologie entraînant la formation de poches sous la gencive et une perte progressive de l'ancrage dentaire, le traitement a pour but d'éliminer l'infection afin de stopper cette évolution.
 
-  // Legacy unified template (for backward compatibility — uses template 1 if no specific value set)
-  const DEFAULT_RELANCE_TEMPLATE = `Bonjour {{prenom}},
+La Thérapeutique Parodontale : Nous procéderons à un assainissement sous-gingival en profondeur pour retirer le tartre et la plaque bactérienne. Lors de ces séances, nous calibrerons ensemble les brossettes interdentaires adaptées à vos espaces. Je vous demanderai également de bien vouloir ramener votre propre brosse à dents afin de faire le point sur votre technique de brossage.
 
-Je reviens vers vous suite au devis pour {{soins}} que je vous ai transmis le {{date_envoi}}.
+La Maintenance Parodontale : Une fois la phase d'assainissement terminée, nous mettrons en place des séances de contrôle régulières.
 
-Avez-vous des questions ou besoin d'éclaircissements sur les soins proposés ? N'hésitez pas à me contacter ou à reprendre rendez-vous quand cela vous conviendra.
+2. Phase chirurgicale et implantaire
+
+La Deuxième prémolaire en bas à gauche (trente-cinq) ne pouvant être conservée, la prise en charge s'articulera ainsi :
+
+Extraction et comblement : Nous procéderons à l'extraction de la dent. Lors de cette intervention, nous réaliserons un comblement osseux pour préserver le volume de l'os de votre mâchoire.
+
+Cicatrisation et pose de l'implant : Après une période de cicatrisation de quelques mois, nous procéderons à la pose de l'implant, qui sera suivi de sa couronne définitive.
+
+Je vous laisse envoyer les devis à votre mutuelle pour connaître votre niveau de prise en charge, et revenir vers le secrétariat du cabinet afin de fixer vos rendez-vous dès que vous le souhaitez.
+
+N'hésitez pas à me solliciter si vous avez la moindre interrogation.
 
 Bien cordialement,
-{{doctor}}`;
+Dr KEBIECHE
+Téléphone : 01 42 42 94 69
+
+Diplômé de l'Université Paris Descartes
+Ancien Praticien Hospitalier en Service de Chirurgie Orale
+D.U d'Implantologie et d'Esthétique dentaire - Université d'Evry
+D.U de parodontologie avancé - Université Côte d'Azur
+
+Réponds UNIQUEMENT avec le corps du mail prêt à coller. Pas d'objet, pas de "Voici le mail :", juste le texte. Termine toujours par le bloc de signature complet (Bien cordialement / Dr KEBIECHE / téléphone / 4 diplômes).`;
+
+  const DEFAULT_RELANCE_TEMPLATE_1 = `{{salutation}},
+
+Nous espérons que vous allez bien. Nous souhaitions savoir si vous aviez eu le temps de consulter votre devis concernant les soins à réaliser avec le Dr Kebieche, envoyé le {{date_envoi}}.
+
+Si vous avez des questions ou besoin de précisions, nous restons à votre disposition pour vous accompagner.
+
+N'hésitez pas à nous contacter par téléphone au 01 42 42 94 69 ou par retour d'email.
+
+Bonne journée,
+
+L'équipe du Dr KEBIECHE
+
+---
+
+Diplômé de l'Université Paris Descartes
+Ancien Praticien Hospitalier en Service de Chirurgie Orale
+D.U d'Implantologie et d'Esthétique dentaire - Université d'Evry
+D.U de parodontologie avancé - Université Côte d'Azur`;
+
+  const DEFAULT_RELANCE_TEMPLATE_2 = `{{salutation}},
+
+Nous espérons que vous allez bien depuis notre dernier échange.
+
+Nous revenons vers vous concernant le plan de traitement établi avec le Dr Kebieche. Nous comprenons tout à fait que vous puissiez avoir un emploi du temps chargé ou que vous ayez simplement choisi de différer vos soins à une période plus propice.
+
+Sachez qu'il n'y a aucune urgence de notre côté. Votre dossier reste ouvert et si vous souhaitez reprendre contact pour planifier vos rendez-vous, ou si vous avez besoin d'échanger à nouveau sur le devis, nous sommes là pour vous.
+
+N'hésitez pas à nous joindre au 01 42 42 94 69 ou par retour d'e-mail lorsque vous le jugerez opportun.
+
+Nous vous souhaitons une excellente journée,
+
+L'équipe du Dr KEBIECHE
+
+---
+
+Diplômé de l'Université Paris Descartes
+Ancien Praticien Hospitalier en Service de Chirurgie Orale
+D.U d'Implantologie et d'Esthétique dentaire - Université d'Evry
+D.U de parodontologie avancé - Université Côte d'Azur`;
+
+  // Legacy unified template (for backward compatibility — uses template 1 if no specific value set)
+  const DEFAULT_RELANCE_TEMPLATE = DEFAULT_RELANCE_TEMPLATE_1;
 
   function renderSettings() {
     document.getElementById('setting-relance-days').value = getSetting('relanceDays', '21');
@@ -2651,6 +2843,24 @@ Bien cordialement,
     }
     toast('Enregistré', 'success');
     setGreeting();
+  });
+
+  // Bouton "Réinitialiser" à côté de chaque template
+  document.querySelectorAll('[data-reset-template]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const key = btn.dataset.resetTemplate;
+      const map = {
+        relanceTemplate: { def: DEFAULT_RELANCE_TEMPLATE_1, el: 'setting-relance-template', label: '1ère relance' },
+        relanceTemplate2: { def: DEFAULT_RELANCE_TEMPLATE_2, el: 'setting-relance-template-2', label: '2ème relance' },
+        vulgarizePrompt: { def: DEFAULT_VULGARIZE_PROMPT, el: 'setting-vulgarize-prompt', label: 'Vulgariser' },
+        maintenanceTemplate: { def: DEFAULT_MAINTENANCE_TEMPLATE, el: 'setting-maintenance-template', label: 'Maintenance' }
+      };
+      const entry = map[key];
+      if (!entry) return;
+      if (!confirm(`Restaurer le template « ${entry.label} » aux valeurs par défaut ? Tes modifications seront perdues. Clique "Enregistrer les modifications" après pour persister.`)) return;
+      document.getElementById(entry.el).value = entry.def;
+      toast('Template restauré (n\'oublie pas d\'Enregistrer)', 'info');
+    });
   });
 
   // ========================================
@@ -2979,21 +3189,44 @@ Bien cordialement,
   // GMAIL API (envoi mail relance, mail récap)
   // ========================================
   const Gmail = {
+    _textToHtml(body) {
+      const esc = (s) => String(s)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+      const renderParas = (text, style) => text.split(/\n{2,}/).map(p => {
+        const inner = esc(p.trim()).replace(/\n/g, '<br>');
+        return inner ? `<p style="${style}">${inner}</p>` : '';
+      }).filter(Boolean).join('');
+      const normalized = String(body || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+      // Marqueur signature : une ligne contenant uniquement 3+ tirets (avec espaces ok)
+      // Tout ce qui suit est rendu centré, plus petit, avec un trait de séparation
+      const parts = normalized.split(/\n[ \t]*-{3,}[ \t]*\n/);
+      const bodyPart = parts[0] || '';
+      const sigPart = parts.length > 1 ? parts.slice(1).join('\n\n') : '';
+      const bodyHtml = renderParas(bodyPart, 'margin:0 0 12px 0');
+      let sigHtml = '';
+      if (sigPart.trim()) {
+        const sigInner = renderParas(sigPart, 'margin:0 0 6px 0');
+        sigHtml = `<div style="margin:32px auto 0;padding-top:16px;border-top:1px solid #E5E5EA;text-align:center;color:#48484A;font-size:12.5px;line-height:1.55;max-width:520px">${sigInner}</div>`;
+      }
+      return `<!doctype html><html><head><meta charset="utf-8"></head><body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Inter,Roboto,sans-serif;color:#0A0A0B;font-size:14px;line-height:1.55;margin:0">${bodyHtml}${sigHtml}</body></html>`;
+    },
     async sendEmail({ to, subject, body, bcc = '', from = '' }) {
       if (!to) throw new Error('Destinataire manquant');
       const token = await GoogleAuth.getAccessToken();
+      const htmlBody = this._textToHtml(body);
       const lines = [];
       if (from) lines.push(`From: ${from}`);
       lines.push(`To: ${to}`);
       if (bcc) lines.push(`Bcc: ${bcc}`);
-      // Subject in MIME-encoded UTF-8
       const subjectB64 = btoa(unescape(encodeURIComponent(subject || '')));
       lines.push(`Subject: =?UTF-8?B?${subjectB64}?=`);
       lines.push('MIME-Version: 1.0');
-      lines.push('Content-Type: text/plain; charset=utf-8');
+      lines.push('Content-Type: text/html; charset=utf-8');
       lines.push('Content-Transfer-Encoding: base64');
       lines.push('');
-      const bodyB64 = btoa(unescape(encodeURIComponent(body || ''))).replace(/(.{76})/g, '$1\r\n');
+      const bodyB64 = btoa(unescape(encodeURIComponent(htmlBody))).replace(/(.{76})/g, '$1\r\n');
       const messageRaw = lines.join('\r\n') + '\r\n' + bodyB64;
       const encodedMessage = btoa(unescape(encodeURIComponent(messageRaw))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
       const res = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
@@ -3179,6 +3412,9 @@ Bien cordialement,
     const doctor = (getSetting('doctorName', '') || '').trim() || 'Votre dentiste';
     const userEmail = getSetting('googleUserEmail', '');
     const filled = template
+      .replaceAll('{{salutation}}', buildSalutation(patient))
+      .replaceAll('{{civilite}}', titreOf(patient))
+      .replaceAll('{{titre}}', titreOf(patient))
       .replaceAll('{{prenom}}', patient.prenom || '')
       .replaceAll('{{nom}}', patient.nom || '')
       .replaceAll('{{type_maintenance}}', typeLabel)
@@ -3286,7 +3522,7 @@ Bien cordialement,
       const promptTemplate = getSetting('vulgarizePrompt', DEFAULT_VULGARIZE_PROMPT);
       const doctor = (getSetting('doctorName', '') || '').trim() || 'Votre dentiste';
       const prompt = promptTemplate.split('{{soins}}').join(keywords).split('{{doctor}}').join(doctor);
-      const result = await geminiGenerateText(prompt, { temperature: 0.7, maxOutputTokens: 1024 });
+      const result = await geminiGenerateText(prompt, { temperature: 0.7, maxOutputTokens: 4096 });
       document.getElementById('vulgarize-output').value = result;
       document.getElementById('vulgarize-result-block').classList.remove('hidden');
       status.textContent = '✓ Généré';
@@ -3343,6 +3579,9 @@ Bien cordialement,
       : getSetting('relanceTemplate', DEFAULT_RELANCE_TEMPLATE_1);
     const doctorName = (getSetting('doctorName', '') || '').trim() || 'Votre dentiste';
     const filled = template
+      .replaceAll('{{salutation}}', buildSalutation(pInfo))
+      .replaceAll('{{civilite}}', titreOf(pInfo))
+      .replaceAll('{{titre}}', titreOf(pInfo))
       .replaceAll('{{prenom}}', pInfo.prenom || '')
       .replaceAll('{{nom}}', pInfo.nom || '')
       .replaceAll('{{soins}}', devis.soins || '')
@@ -3639,9 +3878,14 @@ Bien cordialement,
       });
     }
 
-    // Debug log
+    // Debug log + bannière mode dev
     window.melyiaElectron.getAppInfo().then(info => {
       console.log('[Melyia Electron]', info);
+      if (info && info.isDev) {
+        const banner = document.getElementById('dev-mode-banner');
+        if (banner) banner.classList.remove('hidden');
+        document.title = 'Melyia TEST (DEV) — ne pas utiliser pour de vrais patients';
+      }
     }).catch(() => {});
 
     // ----- Auto-updater (electron-updater) -----
@@ -3790,6 +4034,39 @@ Bien cordialement,
     }
   });
 
+  // Migration v2.4.1 : propose le remplacement des anciens templates par les nouveaux defaults (avec civilité + signature centrée)
+  function offerTemplatesMigrationV241() {
+    if (getSetting('templatesMigrationV241', '0') === '1') return;
+    const hasAnyCustom = ['relanceTemplate','relanceTemplate2','vulgarizePrompt','maintenanceTemplate']
+      .some(k => localStorage.getItem('melyia_' + k));
+    if (!hasAnyCustom) {
+      // Fresh install : les defaults du code s'appliquent automatiquement, rien à migrer
+      setSetting('templatesMigrationV241', '1');
+      return;
+    }
+    setTimeout(() => {
+      toastConfirm('Nouveaux templates de mail dispo (signature centrée + civilité M./Mme auto). Remplacer tes templates actuels ?', {
+        confirmLabel: 'Adopter',
+        cancelLabel: 'Garder les miens',
+        durationMs: 30000,
+        onConfirm: () => {
+          setSetting('relanceTemplate', DEFAULT_RELANCE_TEMPLATE_1);
+          setSetting('relanceTemplate2', DEFAULT_RELANCE_TEMPLATE_2);
+          setSetting('vulgarizePrompt', DEFAULT_VULGARIZE_PROMPT);
+          setSetting('maintenanceTemplate', DEFAULT_MAINTENANCE_TEMPLATE);
+          setSetting('templatesMigrationV241', '1');
+          toast('Templates mis à jour ✓', 'success');
+          if (document.getElementById('view-settings') && document.getElementById('view-settings').classList.contains('active')) {
+            renderSettings();
+          }
+        },
+        onCancel: () => {
+          setSetting('templatesMigrationV241', '1');
+        }
+      });
+    }, 4000);
+  }
+
   async function init() {
     await refreshPatientsCache();
     setGreeting();
@@ -3799,6 +4076,7 @@ Bien cordialement,
     setTimeout(checkRelancesOnStartup, 800);
     setTimeout(checkMorningDigest, 2000);
     setTimeout(checkDrivePull, 3000);
+    offerTemplatesMigrationV241();
   }
 
   init();
