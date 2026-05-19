@@ -1,0 +1,19 @@
+# Cloudflare Pages headers
+# Cache long pour les assets statiques (icônes, vendor JS)
+/icons/*
+  Cache-Control: public, max-age=31536000, immutable
+
+/vendor/*
+  Cache-Control: public, max-age=31536000, immutable
+
+# Manifest et service worker : pas de cache (toujours frais)
+/manifest.webmanifest
+  Content-Type: application/manifest+json
+  Cache-Control: public, max-age=0, must-revalidate
+
+/sw.js
+  Cache-Control: public, max-age=0, must-revalidate
+
+# HTML : revalidation systématique
+/*.html
+  Cache-Control: public, max-age=0, must-revalidate

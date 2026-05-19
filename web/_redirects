@@ -1,0 +1,3 @@
+# Cloudflare Pages redirects
+# Clean URLs : /oauth-callback → /oauth-callback.html
+/oauth-callback /oauth-callback.html 200
