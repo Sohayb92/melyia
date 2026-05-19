@@ -1042,6 +1042,26 @@
     return `${(nom||'').toLowerCase().trim()}|${(prenom||'').toLowerCase().trim()}|${(email||'').toLowerCase().trim()}`;
   }
 
+  // Détecte un patient existant qui ressemble à celui qu'on essaie de créer.
+  // Match si nom+prenom (normalisés) identiques ET (emails identiques OU au moins un email vide).
+  // Si les 2 ont un email rempli mais différent : ce sont 2 personnes différentes, pas un doublon.
+  async function findPotentialDuplicatePatient(data) {
+    const np = _normPrenom(data.prenom);
+    const nn = (data.nom || '').toLowerCase().trim();
+    const ne = (data.email || '').toLowerCase().trim();
+    if (!nn && !ne) return null;
+    const all = await db.patients.toArray();
+    return all.find(p => {
+      const ep = _normPrenom(p.prenom);
+      const en = (p.nom || '').toLowerCase().trim();
+      const ee = (p.email || '').toLowerCase().trim();
+      if (np !== ep) return false;
+      if (nn !== en) return false;
+      if (ne && ee && ne !== ee) return false;
+      return true;
+    });
+  }
+
   async function findOrCreatePatient({ prenom, nom, email, telephone, notes }) {
     if (!nom && !email) throw new Error('Au moins un nom ou un email pour créer le patient');
     const all = await db.patients.toArray();
@@ -2364,51 +2384,86 @@ Règles :
       telephone: document.getElementById('patient-form-tel').value.trim(),
       notes: document.getElementById('patient-form-notes').value.trim()
     };
-    let savedId;
+
+    // Continuation post-save : ferme modal, re-render, gère flow pending devis ou propose devis
+    async function continuePostSave(patientId, offerDevisToast) {
+      closePatientModal();
+      await refreshPatientsCache();
+      if (pendingDevisDataAfterPatientCreate) {
+        const pending = pendingDevisDataAfterPatientCreate;
+        pendingDevisDataAfterPatientCreate = null;
+        const p = await db.patients.get(patientId);
+        openModal(null, p);
+        setTimeout(() => {
+          if (pending.montant) document.getElementById('form-montant').value = pending.montant;
+          if (pending.date) document.getElementById('form-date').value = pending.date;
+          if (pending.soins) document.getElementById('form-soins').value = pending.soins;
+          if (pending.notes) document.getElementById('form-notes').value = pending.notes;
+        }, 100);
+        return;
+      }
+      if (document.getElementById('view-patients').classList.contains('active')) renderPatients();
+      if (document.getElementById('view-dashboard').classList.contains('active')) renderDashboard();
+      if (typeof scheduleAutoBackup === 'function') scheduleAutoBackup();
+      if (offerDevisToast && data.nom) {
+        const p = await db.patients.get(patientId);
+        setTimeout(() => {
+          toastConfirm(`✓ ${p.prenom} ${p.nom}. Créer son devis ?`, {
+            confirmLabel: 'Créer le devis',
+            cancelLabel: 'Plus tard',
+            onConfirm: () => openModal(null, p)
+          });
+        }, 200);
+      }
+    }
+
+    // Cas 1 : édition d'un patient existant
     if (id) {
-      savedId = parseInt(id);
+      const savedId = parseInt(id);
       await db.patients.update(savedId, data);
       toast('Patient modifié', 'success');
-    } else {
-      data.created_at = new Date().toISOString();
-      savedId = await db.patients.add(data);
-      toast('Patient enregistré', 'success');
-    }
-    closePatientModal();
-    await refreshPatientsCache();
-
-    // Si on était en train de créer un devis avant, on rouvre la modal devis avec le nouveau patient sélectionné
-    if (pendingDevisDataAfterPatientCreate) {
-      const pending = pendingDevisDataAfterPatientCreate;
-      pendingDevisDataAfterPatientCreate = null;
-      const newPatient = await db.patients.get(savedId);
-      openModal(null, newPatient);
-      // Restaurer les valeurs déjà saisies dans le devis
-      setTimeout(() => {
-        if (pending.montant) document.getElementById('form-montant').value = pending.montant;
-        if (pending.date) document.getElementById('form-date').value = pending.date;
-        if (pending.soins) document.getElementById('form-soins').value = pending.soins;
-        if (pending.notes) document.getElementById('form-notes').value = pending.notes;
-      }, 100);
+      await continuePostSave(savedId, false);
       return;
     }
 
-    if (document.getElementById('view-patients').classList.contains('active')) renderPatients();
-    if (document.getElementById('view-dashboard').classList.contains('active')) renderDashboard();
-    if (typeof scheduleAutoBackup === 'function') scheduleAutoBackup();
-
-    // Feature B : flow enchainé "nouveau patient → premier devis"
-    // Si c'est une création (pas une edit), proposer d'enchaîner sur un devis
-    if (!id && data.nom) {
-      const newPatient = await db.patients.get(savedId);
-      setTimeout(() => {
-        toastConfirm(`✓ ${newPatient.prenom} ${newPatient.nom} créé. Créer son devis ?`, {
-          confirmLabel: 'Créer le devis',
-          cancelLabel: 'Plus tard',
-          onConfirm: () => openModal(null, newPatient)
-        });
-      }, 200);
+    // Cas 2 : création — check doublon avant add
+    const dup = await findPotentialDuplicatePatient(data);
+    if (dup) {
+      const fullName = patientFullName(dup);
+      const dupEmail = dup.email ? ` (${dup.email})` : '';
+      toastConfirm(`⚠ "${fullName}"${dupEmail} existe déjà. Utiliser ce patient ?`, {
+        confirmLabel: 'Utiliser existant',
+        cancelLabel: 'Créer doublon',
+        durationMs: 30000,
+        onConfirm: async () => {
+          // Merge des infos manquantes chez l'existant (telephone vide, email vide, civilité absente)
+          const updates = {};
+          if (!dup.email && data.email) updates.email = data.email;
+          if (!dup.telephone && data.telephone) updates.telephone = data.telephone;
+          if (!dup.civilite && data.civilite) updates.civilite = data.civilite;
+          if (Object.keys(updates).length) {
+            await db.patients.update(dup.id, updates);
+            toast('Patient existant complété avec les nouvelles infos', 'info');
+          } else {
+            toast('Patient existant réutilisé', 'info');
+          }
+          await continuePostSave(dup.id, false);
+        },
+        onCancel: async () => {
+          data.created_at = new Date().toISOString();
+          const newId = await db.patients.add(data);
+          toast('Patient créé (doublon assumé)', 'success');
+          await continuePostSave(newId, true);
+        }
+      });
+      return;
     }
+
+    // Cas 3 : pas de doublon, création normale
+    data.created_at = new Date().toISOString();
+    const newId = await db.patients.add(data);
+    toast('Patient enregistré', 'success');
+    await continuePostSave(newId, true);
     });
   });
 
