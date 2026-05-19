@@ -27,6 +27,36 @@ const IS_DEV = !app.isPackaged;
 const APP_TITLE = IS_DEV ? 'Melyia — TEST (DEV) — ne pas utiliser pour de vrais patients' : 'Melyia';
 const TRAY_TOOLTIP = IS_DEV ? 'Melyia TEST (mode dev)' : 'Melyia — Suivi devis';
 
+// Whitelist des domaines vers lesquels shell.openExternal est autorisé.
+// Tout autre URL (typiquement injectée via du contenu user dans un mail/lien) sera bloquée.
+const SAFE_EXTERNAL_HOSTS = [
+  'accounts.google.com',
+  'oauth2.googleapis.com',
+  'gmail.googleapis.com',
+  'drive.googleapis.com',
+  'www.googleapis.com',
+  'console.cloud.google.com',
+  'github.com',
+  'github.io',
+  'objects.githubusercontent.com',
+  'doctolib.fr',
+  'www.doctolib.fr',
+  'drkebieche.fr',
+  'drkebieche.com',
+  'm.drkebieche.fr'
+];
+function isSafeExternalUrl(rawUrl) {
+  try {
+    const u = new URL(rawUrl);
+    if (u.protocol !== 'https:' && u.protocol !== 'http:' && u.protocol !== 'mailto:' && u.protocol !== 'tel:') return false;
+    if (u.protocol === 'mailto:' || u.protocol === 'tel:') return true;
+    const host = u.hostname.toLowerCase();
+    return SAFE_EXTERNAL_HOSTS.some(safe => host === safe || host.endsWith('.' + safe));
+  } catch (e) {
+    return false;
+  }
+}
+
 const HTML_PATH = app.isPackaged
   ? path.join(process.resourcesPath, 'melyia.html')
   : path.join(__dirname, '..', 'melyia.html');
@@ -124,9 +154,14 @@ function createWindow() {
     }
   });
 
-  // Open external links in default browser
+  // Open external links in default browser — whitelist domaines de confiance uniquement
+  // (anti-hijack : si un jour un mail / contenu user injecte un lien malveillant, on bloque)
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    shell.openExternal(url);
+    if (isSafeExternalUrl(url)) {
+      shell.openExternal(url);
+    } else {
+      console.warn('[Melyia] Blocked external URL not in whitelist:', url);
+    }
     return { action: 'deny' };
   });
 }

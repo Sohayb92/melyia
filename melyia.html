@@ -1025,6 +1025,46 @@
     localStorage.setItem('melyia_' + key, value);
   }
 
+  // Clés de localStorage à NE JAMAIS inclure dans les exports JSON ou les backups Drive.
+  // Le ClientId reste exportable (c'est un identifiant public OAuth, pas un secret).
+  // Le ClientSecret + clé API Gemini + tokens OAuth sont sensibles → exclus.
+  const SENSITIVE_SETTING_KEYS = new Set([
+    'melyia_googleClientSecret',
+    'melyia_apiKey',
+    'melyia_google_tokens'
+  ]);
+  function isSettingExportable(key) {
+    return key.startsWith('melyia_') && !SENSITIVE_SETTING_KEYS.has(key);
+  }
+
+  // Valide qu'un objet ressemble à un backup Mélyia avant de l'utiliser pour écraser la base locale.
+  // Retourne { ok: true } ou { ok: false, reason: '...' }
+  function validateBackupShape(data) {
+    if (!data || typeof data !== 'object') return { ok: false, reason: 'fichier vide ou pas un objet JSON' };
+    const arrayFields = ['patients', 'devis', 'relances', 'maintenances', 'rappels_maintenance'];
+    for (const f of arrayFields) {
+      if (f in data && !Array.isArray(data[f])) return { ok: false, reason: `champ "${f}" présent mais pas un tableau` };
+    }
+    if ('settings' in data && (typeof data.settings !== 'object' || Array.isArray(data.settings))) {
+      return { ok: false, reason: 'champ "settings" présent mais pas un objet' };
+    }
+    // Au moins une table doit être présente, sinon ce n'est pas un backup valide
+    const hasAnyData = arrayFields.some(f => Array.isArray(data[f]));
+    if (!hasAnyData) return { ok: false, reason: 'aucune table de données reconnue dans le fichier' };
+    // Pour chaque devis, vérifier les champs minimum (sinon Dexie va casser à l'add)
+    if (Array.isArray(data.devis)) {
+      for (const d of data.devis) {
+        if (typeof d !== 'object' || d === null) return { ok: false, reason: 'devis malformé (pas un objet)' };
+      }
+    }
+    if (Array.isArray(data.patients)) {
+      for (const p of data.patients) {
+        if (typeof p !== 'object' || p === null) return { ok: false, reason: 'patient malformé (pas un objet)' };
+      }
+    }
+    return { ok: true };
+  }
+
   // ========================================
   // PATIENTS HELPERS
   // ========================================
@@ -1059,29 +1099,6 @@
       if (nn !== en) return false;
       if (ne && ee && ne !== ee) return false;
       return true;
-    });
-  }
-
-  async function findOrCreatePatient({ prenom, nom, email, telephone, notes }) {
-    if (!nom && !email) throw new Error('Au moins un nom ou un email pour créer le patient');
-    const all = await db.patients.toArray();
-    const key = patientKey(prenom, nom, email);
-    const found = all.find(p => patientKey(p.prenom, p.nom, p.email) === key);
-    if (found) {
-      // mettre à jour les infos manquantes
-      const updates = {};
-      if (!found.email && email) updates.email = email;
-      if (!found.telephone && telephone) updates.telephone = telephone;
-      if (Object.keys(updates).length) await db.patients.update(found.id, updates);
-      return found.id;
-    }
-    return await db.patients.add({
-      prenom: prenom || '',
-      nom: nom || '',
-      email: email || '',
-      telephone: telephone || '',
-      notes: notes || '',
-      created_at: new Date().toISOString()
     });
   }
 
@@ -2994,7 +3011,7 @@ D.U de parodontologie avancé - Université Côte d'Azur`;
     const settings = {};
     for (let i = 0; i < localStorage.length; i++) {
       const k = localStorage.key(i);
-      if (k.startsWith('melyia_')) settings[k] = localStorage.getItem(k);
+      if (isSettingExportable(k)) settings[k] = localStorage.getItem(k);
     }
     const blob = new Blob([JSON.stringify({ patients, devis, relances, settings, exportedAt: new Date().toISOString() }, null, 2)], { type: 'application/json' });
     downloadBlob(blob, `melyia-backup-${new Date().toISOString().slice(0,10)}.json`);
@@ -3037,6 +3054,11 @@ D.U de parodontologie avancé - Université Côte d'Azur`;
     try {
       const text = await file.text();
       const data = JSON.parse(text);
+      const check = validateBackupShape(data);
+      if (!check.ok) {
+        toast('Fichier invalide : ' + check.reason, 'error');
+        return;
+      }
       await db.devis.clear();
       await db.patients.clear();
       await db.relances.clear();
@@ -3048,7 +3070,10 @@ D.U de parodontologie avancé - Université Côte d'Azur`;
       if (data.maintenances && db.maintenances) await db.maintenances.bulkAdd(data.maintenances);
       if (data.rappels_maintenance && db.rappels_maintenance) await db.rappels_maintenance.bulkAdd(data.rappels_maintenance);
       if (data.settings) {
-        for (const [k, v] of Object.entries(data.settings)) localStorage.setItem(k, v);
+        // Filtre : ne JAMAIS restaurer un secret depuis un backup (anti-rollback de credentials compromis)
+        for (const [k, v] of Object.entries(data.settings)) {
+          if (isSettingExportable(k)) localStorage.setItem(k, v);
+        }
       }
       await refreshPatientsCache();
       toast('Import terminé', 'success');
@@ -3387,7 +3412,7 @@ D.U de parodontologie avancé - Université Côte d'Azur`;
     const settings = {};
     for (let i = 0; i < localStorage.length; i++) {
       const k = localStorage.key(i);
-      if (k.startsWith('melyia_') && k !== 'melyia_google_tokens') settings[k] = localStorage.getItem(k);
+      if (isSettingExportable(k)) settings[k] = localStorage.getItem(k);
     }
     return JSON.stringify({ devis, patients, relances, maintenances, rappels_maintenance, settings, exportedAt: new Date().toISOString(), version: '3.0' }, null, 2);
   }
@@ -3847,6 +3872,11 @@ D.U de parodontologie avancé - Université Côte d'Azur`;
           toast('Téléchargement...', 'info');
           try {
             const data = await Drive.downloadBackup(fileId);
+            const check = validateBackupShape(data);
+            if (!check.ok) {
+              toast('Backup invalide : ' + check.reason, 'error');
+              return;
+            }
             // Bug #20 fix : nettoyer aussi maintenances + rappels_maintenance
             await db.devis.clear();
             await db.patients.clear();
@@ -3860,7 +3890,7 @@ D.U de parodontologie avancé - Université Côte d'Azur`;
             if (data.rappels_maintenance && db.rappels_maintenance) await db.rappels_maintenance.bulkAdd(data.rappels_maintenance);
             if (data.settings) {
               for (const [k, v] of Object.entries(data.settings)) {
-                if (k.startsWith('melyia_') && k !== 'melyia_google_tokens') localStorage.setItem(k, v);
+                if (isSettingExportable(k)) localStorage.setItem(k, v);
               }
             }
             await refreshPatientsCache();
@@ -4047,6 +4077,11 @@ D.U de parodontologie avancé - Université Côte d'Azur`;
         if (ok) {
           try {
             const data = await Drive.downloadBackup(latest.id);
+            const check = validateBackupShape(data);
+            if (!check.ok) {
+              toast('Backup Drive invalide : ' + check.reason, 'error');
+              return;
+            }
             await db.devis.clear();
             await db.patients.clear();
             await db.relances.clear();
@@ -4059,7 +4094,7 @@ D.U de parodontologie avancé - Université Côte d'Azur`;
             if (data.rappels_maintenance && db.rappels_maintenance) await db.rappels_maintenance.bulkAdd(data.rappels_maintenance);
             if (data.settings) {
               for (const [k, v] of Object.entries(data.settings)) {
-                if (k.startsWith('melyia_') && k !== 'melyia_google_tokens') localStorage.setItem(k, v);
+                if (isSettingExportable(k)) localStorage.setItem(k, v);
               }
             }
             setSetting('lastLocalModification', String(driveTime));
