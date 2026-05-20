@@ -300,7 +300,7 @@
           <div class="text-[12px] text-ink-500 mt-2 tabular-nums" id="stat-accepted-amount">0 €</div>
         </div>
         <div class="stat-card stat-card-rate" style="animation-delay: 150ms">
-          <div class="text-[12px] text-accent font-medium">Acceptation</div>
+          <div class="text-[12px] text-accent font-medium">Conversion</div>
           <div class="text-[22px] font-semibold tabular-nums leading-none mt-2.5 text-ink-900" id="stat-rate">—</div>
           <div class="text-[12px] text-ink-500 mt-2" id="stat-rate-detail">—</div>
         </div>
@@ -450,7 +450,7 @@
         <div class="bg-white border border-ink-200 rounded-2xl p-3 md:p-4" style="border-left: 3px solid #0A84FF">
           <div class="text-[10px] md:text-[11px] uppercase tracking-wider text-accent font-semibold flex items-center gap-1.5">
             <span class="w-1.5 h-1.5 rounded-full bg-accent"></span>
-            <span class="hidden sm:inline">Taux acceptation</span><span class="sm:hidden">Taux</span>
+            <span class="hidden sm:inline">Taux conversion</span><span class="sm:hidden">Convers.</span>
           </div>
           <div id="stat-taux" class="text-[16px] md:text-[20px] font-semibold tabular-nums mt-1.5 leading-none">—</div>
           <div id="stat-taux-delta" class="text-[11px] mt-1 tabular-nums text-ink-500">—</div>
@@ -1926,7 +1926,8 @@ Règles :
     const refused = all.filter(d => d.status === 'Refusé');
     const noResponse = all.filter(d => d.status === 'Sans réponse');
     const treated = accepted.length + refused.length + noResponse.length;
-    const rate = treated > 0 ? Math.round((accepted.length / treated) * 100) + '%' : '—';
+    // Taux de conversion = accepté / total envoyé (inclut le pipeline pending = honnête business KPI)
+    const rate = total > 0 ? Math.round((accepted.length / total) * 100) + '%' : '—';
 
     const totalAmount = all.reduce((s, d) => s + (d.montant || 0), 0);
     const pendingAmount = pending.reduce((s, d) => s + (d.montant || 0), 0);
@@ -1939,13 +1940,12 @@ Règles :
     document.getElementById('stat-accepted').textContent = accepted.length;
     document.getElementById('stat-accepted-amount').textContent = fmtMoney(acceptedAmount);
     document.getElementById('stat-rate').textContent = rate;
-    // Indicateur fiabilité statistique (cohérent avec Vue Stats v2.5.1)
-    // Si peu de traités OU si le pipeline pending est > 2× les traités : signaler que c'est "à valider"
-    const isLowConfidence = treated > 0 && (treated < 5 || pending.length > treated * 2);
-    if (isLowConfidence) {
-      document.getElementById('stat-rate-detail').innerHTML = `<span class="text-warning">${accepted.length} décidé${accepted.length > 1 ? 's' : ''} · ${pending.length} en attente</span>`;
+    // Sous-label : ratio explicite + pipeline en attente (le % de conversion étant déjà honnête, plus besoin d'avertir)
+    if (total > 0) {
+      const pendingPart = pending.length > 0 ? ` · ${pending.length} en attente` : '';
+      document.getElementById('stat-rate-detail').textContent = `${accepted.length} / ${total} accepté${accepted.length > 1 ? 's' : ''}${pendingPart}`;
     } else {
-      document.getElementById('stat-rate-detail').textContent = treated > 0 ? `${accepted.length} / ${treated} traités` : 'Aucun encore';
+      document.getElementById('stat-rate-detail').textContent = 'Aucun encore';
     }
 
     // Vue "Aujourd'hui" : compter les devis créés aujourd'hui + leur CA + patients créés aujourd'hui
@@ -2359,16 +2359,16 @@ Règles :
     const sansReponse = monthDevis.filter(d => d.status === 'Sans réponse');
     const traites = acceptes.length + refuses.length + sansReponse.length;
     const caAccepte = acceptes.reduce((s, d) => s + (d.montant || 0), 0);
-    const taux = traites > 0 ? Math.round((acceptes.length / traites) * 100) : null;
+    // Taux de conversion = accepté / total envoyé sur le mois (KPI business honnête)
+    const taux = monthDevis.length > 0 ? Math.round((acceptes.length / monthDevis.length) * 100) : null;
     const pending = monthDevis.filter(d => d.status === 'En attente' || d.status === 'Relancé');
     const caAttente = pending.reduce((s, d) => s + (d.montant || 0), 0);
 
     // Calculs mois précédent (pour delta)
     const caEnvoyePrev = prevDevis.reduce((s, d) => s + (d.montant || 0), 0);
     const acceptesPrev = prevDevis.filter(d => d.status === 'Accepté');
-    const traitesPrev = acceptesPrev.length + prevDevis.filter(d => d.status === 'Refusé' || d.status === 'Sans réponse').length;
     const caAcceptePrev = acceptesPrev.reduce((s, d) => s + (d.montant || 0), 0);
-    const tauxPrev = traitesPrev > 0 ? Math.round((acceptesPrev.length / traitesPrev) * 100) : null;
+    const tauxPrev = prevDevis.length > 0 ? Math.round((acceptesPrev.length / prevDevis.length) * 100) : null;
 
     // Render cards
     document.getElementById('stat-ca-envoye').textContent = fmtMoney(caEnvoye);
@@ -2380,13 +2380,14 @@ Règles :
     document.getElementById('stat-accepte-count').textContent = `${acceptes.length} accepté${acceptes.length > 1 ? 's' : ''}`;
 
     document.getElementById('stat-taux').textContent = taux !== null ? taux + '%' : '—';
-    // Fiabilité statistique : peu significatif si < 5 traités
-    if (taux !== null && traites < 5) {
-      document.getElementById('stat-taux-delta').innerHTML = `<span class="text-warning">${acceptes.length} décidé${acceptes.length > 1 ? 's' : ''} · ${pending.length} en attente</span>`;
+    document.getElementById('stat-taux-delta').innerHTML = formatDelta(taux, tauxPrev, true);
+    // Sous-label : ratio explicite + pipeline en attente
+    if (monthDevis.length > 0) {
+      const pendingPart = pending.length > 0 ? ` · ${pending.length} en attente` : '';
+      document.getElementById('stat-traites').textContent = `${acceptes.length} / ${monthDevis.length} accepté${acceptes.length > 1 ? 's' : ''}${pendingPart}`;
     } else {
-      document.getElementById('stat-taux-delta').innerHTML = formatDelta(taux, tauxPrev, true);
+      document.getElementById('stat-traites').textContent = '—';
     }
-    document.getElementById('stat-traites').textContent = `${traites} / ${monthDevis.length} traité${traites > 1 ? 's' : ''}`;
 
     document.getElementById('stat-ca-attente').textContent = fmtMoney(caAttente);
     document.getElementById('stat-attente-count').textContent = `${pending.length} en attente / relancé${pending.length > 1 ? 's' : ''}`;
