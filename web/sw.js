@@ -4,7 +4,7 @@
    - Tout le reste : Network only (Google APIs surtout)
 */
 
-const VERSION = 'v3';
+const VERSION = 'v4';
 const CACHE_STATIC = 'melyia-static-' + VERSION;
 const CACHE_HTML = 'melyia-html-' + VERSION;
 
