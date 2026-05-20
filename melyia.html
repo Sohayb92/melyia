@@ -539,7 +539,8 @@
         <div class="grouped-row">
           <div class="flex-1">
             <div class="text-[15px] font-medium">Mail récap matinal</div>
-            <div class="text-[13px] text-ink-500 mt-0.5">À l'ouverture le matin, mail au cabinet avec les patients à relancer</div>
+            <div class="text-[13px] text-ink-500 mt-0.5">À l'ouverture le matin, mail au cabinet avec les patients à relancer (1× par jour max)</div>
+            <button type="button" id="test-morning-digest-btn" class="text-[12px] text-accent hover:underline mt-1.5">Envoyer le récap maintenant (test)</button>
           </div>
           <label class="switch flex-shrink-0">
             <input type="checkbox" id="setting-morning-digest"/>
@@ -1856,9 +1857,19 @@ Règles :
     if (relancesDues.length > 0) {
       relancesSection.classList.remove('hidden');
       document.getElementById('relances-count-text').textContent = `${relancesDues.length} patient${relancesDues.length > 1 ? 's' : ''} à vérifier sur Doctolib`;
+      const googleReady = GoogleAuth.isConnected();
       document.getElementById('relances-list').innerHTML = relancesDues.map(d => {
         const isFirst = d.status === 'En attente';
         const pInfo = devisPatientDisplay(d);
+        // Bouton mail Mélyia si Google connecté + email patient présent ; sinon fallback "Relancé via Logos"
+        const canMailFromMelyia = isFirst && googleReady && !!(pInfo && pInfo.email);
+        const mailIconSvg = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>';
+        const dashIconSvg = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"/></svg>';
+        const relanceBtnHtml = canMailFromMelyia
+          ? `<button class="mail-relance-btn btn btn-primary btn-sm !px-3" data-id="${d.id}" title="Relancer par mail (Mélyia)">${mailIconSvg}</button>`
+          : (isFirst
+              ? `<button class="quick-relance-btn btn btn-secondary btn-sm !px-3" data-id="${d.id}" data-first="true" title="Relancé via Logos (marquer seulement)">${mailIconSvg}</button>`
+              : `<button class="quick-relance-btn btn btn-secondary btn-sm !px-3" data-id="${d.id}" data-first="false" title="Sans réponse">${dashIconSvg}</button>`);
         return `
           <div class="px-4 py-3 flex items-center justify-between gap-3">
             <div class="flex-1 min-w-0 cursor-pointer open-detail-btn" data-id="${d.id}">
@@ -1869,8 +1880,8 @@ Règles :
               <div class="text-[13px] text-ink-500 truncate">${esc(d.soins)} ${d.montant ? '· ' + fmtMoney(d.montant) : ''}</div>
             </div>
             <div class="flex gap-1.5">
-              <button class="quick-relance-btn btn btn-secondary btn-sm !px-3" data-id="${d.id}" data-first="${isFirst}" title="${isFirst ? 'Relancé via Logos' : 'Sans réponse'}">${isFirst ? '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>' : '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"/></svg>'}</button>
-              <button class="quick-action-btn btn btn-success btn-sm !px-3" data-id="${d.id}" data-action="accepted" title="Accepté"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg></button>
+              ${relanceBtnHtml}
+              <button class="quick-action-btn btn btn-success btn-sm !px-3" data-id="${d.id}" data-action="accepted" title="Validé"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg></button>
             </div>
           </div>
         `;
@@ -1999,6 +2010,22 @@ Règles :
           renderDashboard();
           if (typeof scheduleAutoBackup === 'function') scheduleAutoBackup();
         });
+      });
+    });
+    // Bouton "Relancer par mail Mélyia" (Gmail) sur dashboard quick-actions
+    document.querySelectorAll('.mail-relance-btn').forEach(b => {
+      b.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const id = parseInt(b.dataset.id, 10);
+        const devis = await db.devis.get(id);
+        if (!devis) return;
+        const patient = devis.patient_id ? await db.patients.get(devis.patient_id) : null;
+        const pInfo = patient || { prenom: devis.patient_prenom || '', nom: devis.patient_nom || '', email: devis.patient_email || '' };
+        if (!pInfo.email) {
+          toast('Pas d\'email pour ce patient', 'warning');
+          return;
+        }
+        openComposeRelanceModal(devis, pInfo);
       });
     });
     document.querySelectorAll('.quick-action-btn').forEach(b => {
@@ -2917,6 +2944,26 @@ D.U de parodontologie avancé - Université Côte d'Azur`;
     setGreeting();
   });
 
+  // Bouton "Envoyer le récap maintenant (test)" — force l'envoi même si déjà envoyé aujourd'hui
+  const testDigestBtn = document.getElementById('test-morning-digest-btn');
+  if (testDigestBtn) {
+    testDigestBtn.addEventListener('click', async () => {
+      testDigestBtn.disabled = true;
+      const orig = testDigestBtn.textContent;
+      testDigestBtn.textContent = 'Envoi…';
+      try {
+        const result = await checkMorningDigest({ force: true });
+        if (result && result.skipped) {
+          // toastConfirm déjà géré par checkMorningDigest si force=true
+        }
+      } catch (e) {
+        toast('Erreur : ' + e.message, 'error');
+      }
+      testDigestBtn.disabled = false;
+      testDigestBtn.textContent = orig;
+    });
+  }
+
   // Bouton "Réinitialiser" à côté de chaque template
   document.querySelectorAll('[data-reset-template]').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -3754,13 +3801,22 @@ D.U de parodontologie avancé - Université Côte d'Azur`;
   // ========================================
   // MORNING DIGEST EMAIL (lazy, à l'ouverture)
   // ========================================
-  async function checkMorningDigest() {
-    if (getSetting('morningDigestEnabled', '0') !== '1') return;
-    if (!GoogleAuth.isConnected()) return;
+  // sendMorningDigest({ force: true }) ignore les conditions (toggle, date déjà envoyée)
+  // pour permettre un test manuel depuis Réglages
+  async function checkMorningDigest(opts = {}) {
+    const force = !!opts.force;
+    if (!force && getSetting('morningDigestEnabled', '0') !== '1') return { skipped: 'morningDigestEnabled is OFF' };
+    if (!GoogleAuth.isConnected()) {
+      if (force) toast('Connecte-toi à Google d\'abord', 'warning');
+      return { skipped: 'not connected to Google' };
+    }
     const cabinetEmail = getSetting('cabinetEmail', '').trim();
-    if (!cabinetEmail) return;
+    if (!cabinetEmail) {
+      if (force) toast('Renseigne le mail cabinet dans Réglages', 'warning');
+      return { skipped: 'cabinetEmail empty' };
+    }
     const today = new Date().toISOString().slice(0, 10);
-    if (getSetting('lastMorningDigestDate', '') === today) return;
+    if (!force && getSetting('lastMorningDigestDate', '') === today) return { skipped: 'already sent today' };
 
     await refreshPatientsCache();
     const all = await db.devis.toArray();
@@ -3776,7 +3832,8 @@ D.U de parodontologie avancé - Université Côte d'Azur`;
     // Feature C : skip si VIDE (les deux types) → pas de bruit
     if (relancesDues.length === 0 && maintenancesDues.length === 0) {
       setSetting('lastMorningDigestDate', today);
-      return;
+      if (force) toast('Aucune relance ni maintenance due aujourd\'hui — mail non envoyé', 'info');
+      return { skipped: 'no items due today' };
     }
 
     let body = `Bonjour,\n\n`;
@@ -3817,8 +3874,12 @@ D.U de parodontologie avancé - Université Côte d'Azur`;
       await Gmail.sendEmail({ to: cabinetEmail, subject, body });
       setSetting('lastMorningDigestDate', today);
       console.log('[Melyia] Morning digest envoyé à', cabinetEmail);
+      if (force) toast(`Récap envoyé à ${cabinetEmail} ✓`, 'success');
+      return { sent: true, to: cabinetEmail };
     } catch (e) {
       console.error('[Melyia] Morning digest failed:', e);
+      if (force) toast('Erreur envoi : ' + e.message, 'error');
+      return { error: e.message };
     }
   }
 
