@@ -967,6 +967,13 @@
             <label class="text-[13px] font-medium text-ink-700 block mb-1.5 ml-1">Notes <span class="text-ink-500 font-normal">(optionnel)</span></label>
             <textarea id="patient-form-notes" rows="2" placeholder="ex: patient anxieux, allergie pénicilline, ..." class="input"></textarea>
           </div>
+          <div class="flex items-start gap-3 pt-1 border-t border-ink-100 mt-2 pt-3">
+            <input type="checkbox" id="patient-form-no-contact" class="mt-1 w-4 h-4 accent-danger flex-shrink-0">
+            <label for="patient-form-no-contact" class="text-[13px] text-ink-700 cursor-pointer leading-snug">
+              <span class="font-medium">Ne plus solliciter ce patient (STOP)</span>
+              <div class="text-[12px] text-ink-500 mt-0.5">Coche si le patient a demandé à ne plus recevoir de mails. Bloque les relances automatiques, mails de rappel maintenance, et futures demandes d'avis. Reste valable indéfiniment (compliance LCEN).</div>
+            </label>
+          </div>
           <button type="submit" class="btn btn-primary w-full !mt-5 md:hidden">Enregistrer le patient</button>
         </form>
       </div>
@@ -1717,7 +1724,7 @@ Règles :
       ${relances.length > 0 ? `
         <div class="text-[12px] uppercase tracking-wider text-ink-500 font-semibold ml-1 mb-1.5">Historique relances</div>
         <div class="grouped-list mb-5">
-          ${relances.map(r => `<div class="grouped-row"><div class="text-[14px] text-ink-700">Relance via Logos</div><div class="text-[14px] font-medium tabular-nums text-ink-500">${formatDate(r.date)}</div></div>`).join('')}
+          ${relances.map(r => `<div class="grouped-row"><div class="text-[14px] text-ink-700">${r.method === 'gmail' ? 'Relance par mail (Mélyia)' : 'Relance marquée manuellement'}</div><div class="text-[14px] font-medium tabular-nums text-ink-500">${formatDate(r.date)}</div></div>`).join('')}
         </div>
       ` : ''}
 
@@ -1729,7 +1736,7 @@ Règles :
             <button class="action-btn btn btn-success" data-action="accepted">✓ Accepté</button>
             <button class="action-btn btn btn-secondary" data-action="refused">Refusé</button>
           </div>
-          ${devis.status === 'En attente' ? `<button class="action-btn btn btn-secondary w-full" data-action="relancer">J'ai relancé via Logos</button>` : ''}
+          ${devis.status === 'En attente' ? `<button class="action-btn btn btn-secondary w-full" data-action="relancer">Marquer comme relancé (sans envoyer de mail)</button>` : ''}
           ${devis.status === 'Relancé' ? `<button class="action-btn btn btn-secondary w-full" data-action="noresponse">Sans réponse</button>` : ''}
         ` : `
           <button class="action-btn btn btn-secondary w-full" data-action="reopen">↺ Remettre en attente</button>
@@ -1851,12 +1858,16 @@ Règles :
     const todayLabel = new Date().toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' });
     document.getElementById('today-label').textContent = todayLabel.charAt(0).toUpperCase() + todayLabel.slice(1);
 
-    // Relances dues
+    // Relances dues — triées par date_relance_prevue ASC (les plus en retard en premier)
+    // Exclut les patients ayant demandé STOP (compliance LCEN)
     const now = Date.now();
-    const relancesDues = all.filter(d =>
-      (d.status === 'En attente' || d.status === 'Relancé')
-      && new Date(d.date_relance_prevue).getTime() <= now
-    );
+    const relancesDues = all.filter(d => {
+      if (d.status !== 'En attente' && d.status !== 'Relancé') return false;
+      if (new Date(d.date_relance_prevue).getTime() > now) return false;
+      const p = d.patient_id ? getCachedPatient(d.patient_id) : null;
+      if (p && p.noContact === true) return false;
+      return true;
+    }).sort((a, b) => new Date(a.date_relance_prevue).getTime() - new Date(b.date_relance_prevue).getTime());
     const relancesSection = document.getElementById('relances-section');
     if (relancesDues.length > 0) {
       relancesSection.classList.remove('hidden');
@@ -1865,14 +1876,14 @@ Règles :
       document.getElementById('relances-list').innerHTML = relancesDues.map(d => {
         const isFirst = d.status === 'En attente';
         const pInfo = devisPatientDisplay(d);
-        // Bouton mail Mélyia si Google connecté + email patient présent ; sinon fallback "Relancé via Logos"
+        // Bouton mail Mélyia si Google connecté + email patient présent ; sinon fallback "Marquer relancé"
         const canMailFromMelyia = isFirst && googleReady && !!(pInfo && pInfo.email);
         const mailIconSvg = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>';
         const dashIconSvg = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"/></svg>';
         const relanceBtnHtml = canMailFromMelyia
           ? `<button class="mail-relance-btn btn btn-primary btn-sm !px-3" data-id="${d.id}" title="Relancer par mail (Mélyia)">${mailIconSvg}</button>`
           : (isFirst
-              ? `<button class="quick-relance-btn btn btn-secondary btn-sm !px-3" data-id="${d.id}" data-first="true" title="Relancé via Logos (marquer seulement)">${mailIconSvg}</button>`
+              ? `<button class="quick-relance-btn btn btn-secondary btn-sm !px-3" data-id="${d.id}" data-first="true" title="Marquer comme relancé (sans envoyer de mail)">${mailIconSvg}</button>`
               : `<button class="quick-relance-btn btn btn-secondary btn-sm !px-3" data-id="${d.id}" data-first="false" title="Sans réponse">${dashIconSvg}</button>`);
         return `
           <div class="px-4 py-3 flex items-center justify-between gap-3">
@@ -1945,7 +1956,12 @@ Règles :
     }
 
     // Liste devis
-    let filtered = all.slice().sort((a, b) => new Date(b.date_envoi) - new Date(a.date_envoi));
+    // Tri DESC par date_envoi avec tiebreaker created_at DESC (sinon ordre instable quand même jour)
+    let filtered = all.slice().sort((a, b) => {
+      const dateDiff = new Date(b.date_envoi).getTime() - new Date(a.date_envoi).getTime();
+      if (dateDiff !== 0) return dateDiff;
+      return (new Date(b.created_at || 0).getTime()) - (new Date(a.created_at || 0).getTime());
+    });
     if (currentFilterStatus) filtered = filtered.filter(d => d.status === currentFilterStatus);
     if (currentSearch) filtered = filtered.filter(d => {
       const pInfo = devisPatientDisplay(d);
@@ -2354,6 +2370,7 @@ Règles :
       document.getElementById('patient-form-email').value = patient.email || '';
       document.getElementById('patient-form-tel').value = patient.telephone || '';
       document.getElementById('patient-form-notes').value = patient.notes || '';
+      document.getElementById('patient-form-no-contact').checked = patient.noContact === true || patient.noContact === 1;
       document.getElementById('patient-capture-section').style.display = 'none';
     } else {
       editingPatientId = null;
@@ -2361,6 +2378,7 @@ Règles :
       document.getElementById('patient-form').reset();
       document.getElementById('patient-form-id').value = '';
       document.getElementById('patient-form-civilite').value = '';
+      document.getElementById('patient-form-no-contact').checked = false;
     }
     setTimeout(async () => {
       if (!patient && getSetting('apiKey', '')) {
@@ -2430,7 +2448,8 @@ Règles :
       nom: document.getElementById('patient-form-nom').value.trim(),
       email: document.getElementById('patient-form-email').value.trim(),
       telephone: document.getElementById('patient-form-tel').value.trim(),
-      notes: document.getElementById('patient-form-notes').value.trim()
+      notes: document.getElementById('patient-form-notes').value.trim(),
+      noContact: document.getElementById('patient-form-no-contact').checked === true
     };
 
     // Continuation post-save : ferme modal, re-render, gère flow pending devis ou propose devis
@@ -2560,7 +2579,10 @@ Règles :
       <div class="flex items-center gap-3 mb-5">
         <div class="w-12 h-12 rounded-full bg-ink-100 flex items-center justify-center text-[15px] font-semibold text-ink-700 flex-shrink-0">${esc(initials)}</div>
         <div class="min-w-0 flex-1">
-          <h2 class="text-[20px] font-bold tracking-tight truncate">${esc(patientFullName(patient))}</h2>
+          <div class="flex items-center gap-2 flex-wrap">
+            <h2 class="text-[20px] font-bold tracking-tight truncate">${esc(patientFullName(patient))}</h2>
+            ${patient.noContact === true ? '<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-danger/10 text-danger text-[11px] font-semibold uppercase tracking-wider">STOP demandé</span>' : ''}
+          </div>
           <div class="text-[13px] text-ink-500 truncate">${esc(patient.email || '')}${patient.email && patient.telephone ? ' · ' : ''}${esc(patient.telephone || '')}</div>
         </div>
       </div>
@@ -3258,11 +3280,9 @@ D.U de parodontologie avancé - Université Côte d'Azur`;
       const clientId = getSetting('googleClientId', '').trim();
       const clientSecret = getSetting('googleClientSecret', '').trim();
       if (!clientId || !clientSecret) throw new Error('Configure d\'abord ton Client ID et Secret dans Réglages');
-      // Mode PWA (navigateur) : redirect flow OAuth via /oauth-callback
       if (!this.isElectronAvailable()) {
         return this._signInWebRedirect(clientId, clientSecret);
       }
-      // Mode Electron : loopback :53682
       const tokens = await window.melyiaElectron.googleSignIn({ clientId, clientSecret });
       this.setTokens(tokens);
       if (tokens.userinfo && tokens.userinfo.email) {
@@ -3324,7 +3344,6 @@ D.U de parodontologie avancé - Université Côte d'Azur`;
             refreshToken: tokens.refresh_token, clientId, clientSecret
           });
         } else {
-          // PWA : appel direct au endpoint token (pas de loopback)
           const resp = await fetch('https://oauth2.googleapis.com/token', {
             method: 'POST',
             headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -3583,6 +3602,10 @@ D.U de parodontologie avancé - Université Côte d'Azur`;
       toast('Pas d\'email pour ce patient', 'warning');
       return;
     }
+    if (patient.noContact === true) {
+      toast(`${patientFullName(patient)} a demandé à ne plus être sollicité (STOP). Maintenance annulée.`, 'warning');
+      return;
+    }
     const template = getSetting('maintenanceTemplate', DEFAULT_MAINTENANCE_TEMPLATE);
     const typeLabel = MAINTENANCE_TYPES[maintenance.type]?.label?.toLowerCase() || maintenance.type;
     const doctor = (getSetting('doctorName', '') || '').trim() || 'Votre dentiste';
@@ -3747,6 +3770,20 @@ D.U de parodontologie avancé - Université Côte d'Azur`;
   // COMPOSE RELANCE MAIL (via Gmail)
   // ========================================
   async function openComposeRelanceModal(devis, pInfo) {
+    // Compliance LCEN : bloquer si le patient a coché "Ne plus solliciter"
+    if (pInfo && pInfo.noContact === true) {
+      toastConfirm(`⚠ Le patient ${patientFullName(pInfo)} a demandé à ne plus être sollicité (STOP). Envoyer quand même ?`, {
+        confirmLabel: 'Envoyer (à mes risques)',
+        cancelLabel: 'Annuler',
+        durationMs: 20000,
+        onConfirm: () => {
+          // Force l'ouverture en ignorant le flag noContact pour cet envoi unique
+          const pInfoOverride = Object.assign({}, pInfo, { noContact: false });
+          openComposeRelanceModal(devis, pInfoOverride);
+        }
+      });
+      return;
+    }
     // Choix du template selon le nombre de relances déjà envoyées pour ce devis
     const previousRelances = await db.relances.where('devis_id').equals(devis.id).count();
     const isSecondRelance = previousRelances >= 1;
@@ -3870,12 +3907,16 @@ D.U de parodontologie avancé - Université Côte d'Azur`;
     await refreshPatientsCache();
     const all = await db.devis.toArray();
     const now = Date.now();
-    const relancesDues = all.filter(d =>
-      (d.status === 'En attente' || d.status === 'Relancé') &&
-      new Date(d.date_relance_prevue).getTime() <= now
-    );
+    const relancesDues = all.filter(d => {
+      if (d.status !== 'En attente' && d.status !== 'Relancé') return false;
+      if (new Date(d.date_relance_prevue).getTime() > now) return false;
+      // Compliance LCEN : ne pas inclure les patients STOP dans le récap matinal
+      const p = d.patient_id ? getCachedPatient(d.patient_id) : null;
+      if (p && p.noContact === true) return false;
+      return true;
+    });
 
-    // Inclure aussi maintenances dues dans le récap
+    // Inclure aussi maintenances dues dans le récap (exclusion STOP appliquée plus bas)
     const maintenancesDues = db.maintenances ? await getMaintenancesDues() : [];
 
     // Feature C : skip si VIDE (les deux types) → pas de bruit
@@ -4267,6 +4308,89 @@ D.U de parodontologie avancé - Université Côte d'Azur`;
     }, 4000);
   }
 
+  // Détecte les devis "Relancé" depuis plus de 45 jours sans réponse et propose au user de les marquer "Sans réponse"
+  // en batch via une modal. Toast non-bloquant si > 0 trouvés. Skip si l'user a déjà cliqué "Plus tard" aujourd'hui.
+  async function suggestStaleDevisCleanup() {
+    const today = new Date().toISOString().slice(0, 10);
+    if (getSetting('lastStaleCleanupDate', '') === today) return;
+    const all = await db.devis.toArray();
+    const now = Date.now();
+    const STALE_THRESHOLD_DAYS = 45;
+    const stale = all.filter(d => {
+      if (d.status !== 'Relancé') return false;
+      const dueTime = new Date(d.date_relance_prevue).getTime();
+      if (!dueTime) return false;
+      const daysSinceDeadline = (now - dueTime) / 86400000;
+      return daysSinceDeadline >= STALE_THRESHOLD_DAYS;
+    });
+    if (stale.length === 0) return;
+
+    setTimeout(() => {
+      toastConfirm(`⏳ ${stale.length} devis en relance depuis plus de ${STALE_THRESHOLD_DAYS} jours sans réponse`, {
+        confirmLabel: 'Voir et nettoyer',
+        cancelLabel: 'Plus tard',
+        durationMs: 15000,
+        onConfirm: () => openStaleCleanupModal(stale),
+        onCancel: () => setSetting('lastStaleCleanupDate', today)
+      });
+    }, 4500);
+  }
+
+  function openStaleCleanupModal(staleDevis) {
+    const rows = staleDevis.map((d, idx) => {
+      const p = devisPatientDisplay(d);
+      const daysOld = Math.floor((Date.now() - new Date(d.date_relance_prevue).getTime()) / 86400000);
+      return `
+        <label class="grouped-row block cursor-pointer hover:bg-ink-50" data-stale-idx="${idx}">
+          <div class="flex items-start gap-3">
+            <input type="checkbox" class="stale-cb mt-1 w-4 h-4 accent-accent flex-shrink-0" data-idx="${idx}" checked>
+            <div class="flex-1 min-w-0">
+              <div class="text-[14px] font-medium truncate">${esc(patientFullName(p))}</div>
+              <div class="text-[12px] text-ink-500 mt-0.5">${esc(d.soins || '')} ${d.montant ? '· ' + fmtMoney(d.montant) : ''} · relancé il y a ${daysOld + 24}j</div>
+            </div>
+          </div>
+        </label>
+      `;
+    }).join('');
+
+    const html = `
+      <div class="flex items-center justify-between mb-4">
+        <button id="stale-cancel" class="text-[16px] text-ink-500 font-normal">Annuler</button>
+        <div class="text-[17px] font-semibold">Nettoyer les vieux devis</div>
+        <button id="stale-apply" class="text-[16px] text-accent font-semibold">Appliquer</button>
+      </div>
+      <p class="text-[13px] text-ink-500 mb-4">Ces devis ont été relancés il y a longtemps sans réponse du patient. Les cases cochées passeront en statut <strong>"Sans réponse"</strong>. Décoche ceux que tu veux laisser en attente.</p>
+      <div class="grouped-list">${rows}</div>
+    `;
+    document.getElementById('modal-detail-content').innerHTML = html;
+    document.getElementById('modal-detail-overlay').classList.remove('hidden');
+    document.body.style.overflow = 'hidden';
+
+    document.getElementById('stale-cancel').addEventListener('click', closeDetail);
+    document.getElementById('modal-detail-overlay').addEventListener('click', (e) => {
+      if (e.target.id === 'modal-detail-overlay') closeDetail();
+    });
+    document.getElementById('stale-apply').addEventListener('click', async () => {
+      await withBusyGuard('stale-cleanup', async () => {
+        const checked = document.querySelectorAll('.stale-cb:checked');
+        let count = 0;
+        for (const cb of checked) {
+          const idx = parseInt(cb.dataset.idx, 10);
+          const devis = staleDevis[idx];
+          if (devis) {
+            await db.devis.update(devis.id, { status: 'Sans réponse' });
+            count++;
+          }
+        }
+        setSetting('lastStaleCleanupDate', new Date().toISOString().slice(0, 10));
+        toast(`${count} devis marqué${count > 1 ? 's' : ''} sans réponse`, 'success');
+        closeDetail();
+        renderDashboard();
+        if (typeof scheduleAutoBackup === 'function') scheduleAutoBackup();
+      });
+    });
+  }
+
   async function init() {
     await refreshPatientsCache();
     setGreeting();
@@ -4276,14 +4400,13 @@ D.U de parodontologie avancé - Université Côte d'Azur`;
     setTimeout(checkRelancesOnStartup, 800);
     setTimeout(checkMorningDigest, 2000);
     setTimeout(checkDrivePull, 3000);
+    setTimeout(suggestStaleDevisCleanup, 5000);
     offerTemplatesMigrationV241();
   }
 
   init();
 
-  // ========================================
-  // PWA — Service Worker registration + UI adjustments
-  // ========================================
+  // PWA — Service Worker registration
   const IS_PWA_MODE = !window.melyiaElectron || !window.melyiaElectron.isElectron;
   if (IS_PWA_MODE) {
     document.body.classList.add('is-pwa');
@@ -4294,25 +4417,6 @@ D.U de parodontologie avancé - Université Côte d'Azur`;
         });
       });
     }
-    // Bannière "Installer l'app" (Android Chrome détecte natif, on aide aussi iOS Safari)
-    setTimeout(() => {
-      try {
-        if (localStorage.getItem('melyia_pwa_install_dismissed') === '1') return;
-        const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
-        if (isStandalone) return;
-        const ua = navigator.userAgent.toLowerCase();
-        const isIOS = /iphone|ipad|ipod/.test(ua) && !window.MSStream;
-        if (!isIOS) return;
-        const banner = document.createElement('div');
-        banner.style.cssText = 'position:fixed;bottom:80px;left:12px;right:12px;z-index:200;background:#0A84FF;color:#fff;padding:14px 16px;border-radius:14px;font-size:14px;display:flex;align-items:center;gap:10px;box-shadow:0 8px 24px rgba(10,132,255,0.3);max-width:540px;margin:auto';
-        banner.innerHTML = '<div style="flex:1">Ajoute Mélyia à ton écran d\'accueil : <strong>Partager</strong> puis <strong>"Sur l\'écran d\'accueil"</strong>.</div><button style="background:rgba(255,255,255,0.2);color:#fff;border:none;padding:6px 10px;border-radius:8px;cursor:pointer;font-size:13px">OK</button>';
-        banner.querySelector('button').onclick = () => {
-          localStorage.setItem('melyia_pwa_install_dismissed', '1');
-          banner.remove();
-        };
-        document.body.appendChild(banner);
-      } catch (e) {}
-    }, 3000);
   }
   </script>
 </body>
