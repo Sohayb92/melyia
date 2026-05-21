@@ -331,10 +331,10 @@
       <div class="mb-3">
         <div class="segmented" role="tablist" id="status-filter">
           <div class="segmented-item active" data-status="">Tous</div>
-          <div class="segmented-item" data-status="En attente">En attente</div>
+          <div class="segmented-item" data-status="En attente"><span class="hidden sm:inline">En attente</span><span class="sm:hidden">Attente</span></div>
           <div class="segmented-item" data-status="Relancé">Relancés</div>
           <div class="segmented-item" data-status="Accepté">Acceptés</div>
-          <div class="segmented-item" data-status="non-signes">Non signés</div>
+          <div class="segmented-item" data-status="non-signes"><span class="hidden sm:inline">Non signés</span><span class="sm:hidden">Perdus</span></div>
         </div>
         <div id="non-signes-chips" class="hidden mt-2.5 flex flex-wrap gap-2 px-1">
           <button data-sub="all" class="non-signes-chip px-3 py-1.5 rounded-full text-[12px] font-medium border transition-colors">Tous <span class="ml-1 tabular-nums opacity-70" id="chip-all-count">0</span></button>
@@ -472,7 +472,7 @@
         <div class="bg-white border border-ink-200 rounded-2xl p-3 md:p-4" style="border-left: 3px solid #0A84FF">
           <div class="text-[10px] md:text-[11px] uppercase tracking-wider text-accent font-semibold flex items-center gap-1.5">
             <span class="w-1.5 h-1.5 rounded-full bg-accent"></span>
-            <span class="hidden sm:inline">Acceptation ce mois</span><span class="sm:hidden">Accept.</span>
+            <span class="hidden sm:inline">Soins terminés ce mois</span><span class="sm:hidden">Soins</span>
           </div>
           <div id="stat-taux" class="text-[16px] md:text-[20px] font-semibold tabular-nums mt-1.5 leading-none">—</div>
           <div id="stat-taux-delta" class="text-[11px] mt-1 tabular-nums text-ink-500">—</div>
@@ -2040,10 +2040,9 @@ Règles :
     document.getElementById('stat-accepted').textContent = accepted.length;
     document.getElementById('stat-accepted-amount').textContent = fmtMoney(acceptedAmount);
     document.getElementById('stat-rate').textContent = rate;
-    // Sous-label : ratio explicite + pipeline en attente (le % de conversion étant déjà honnête, plus besoin d'avertir)
+    // Sous-label : ratio explicite (en attente déjà visible dans sa card, pas de doublon)
     if (total > 0) {
-      const pendingPart = pending.length > 0 ? ` · ${pending.length} en attente` : '';
-      document.getElementById('stat-rate-detail').textContent = `${accepted.length} / ${total} accepté${accepted.length > 1 ? 's' : ''}${pendingPart}`;
+      document.getElementById('stat-rate-detail').textContent = `${accepted.length} / ${total} accepté${accepted.length > 1 ? 's' : ''}`;
     } else {
       document.getElementById('stat-rate-detail').textContent = 'Aucun encore';
     }
@@ -2545,21 +2544,17 @@ Règles :
     document.getElementById('stat-ca-accepte-delta').innerHTML = formatDelta(caAccepte, caAcceptePrev);
     document.getElementById('stat-accepte-count').textContent = `${acceptes.length} accepté${acceptes.length > 1 ? 's' : ''} ce mois`;
 
-    // v2.5.8 — Mois en cours = count brut (pas de % trompeur), mois passés = % events-based
-    const isCurrentMonth = (offset === 0);
-    if (isCurrentMonth) {
-      document.getElementById('stat-taux').textContent = acceptes.length;
-      document.getElementById('stat-taux-delta').innerHTML = `<span class="text-ink-400">accepté${acceptes.length > 1 ? 's' : ''} ce mois</span>`;
-      document.getElementById('stat-traites').textContent = `% à confirmer en fin de mois`;
-    } else {
-      document.getElementById('stat-taux').textContent = taux !== null ? taux + '%' : '—';
-      document.getElementById('stat-taux-delta').innerHTML = formatDelta(taux, tauxPrev, true);
-      if (decides > 0) {
-        document.getElementById('stat-traites').textContent = `${acceptes.length} / ${decides} décidé${decides > 1 ? 's' : ''} ce mois`;
-      } else {
-        document.getElementById('stat-traites').textContent = 'Aucune décision ce mois';
-      }
-    }
+    // v2.5.10 — Card devient "Soins terminés ce mois" (vrai output clinique mensuel)
+    const soinsTerminesMois = all.filter(d => d.soinTermine && inRangeBy(d.dateSoinTermine, start, end));
+    const caRealiseMois = soinsTerminesMois.reduce((s, d) => s + (d.montant || 0), 0);
+    const mailsAvisMois = all.filter(d => d.googleReviewMailSent && d.googleReviewMailSentAt && inRangeBy(d.googleReviewMailSentAt, start, end));
+    document.getElementById('stat-taux').textContent = soinsTerminesMois.length;
+    document.getElementById('stat-taux-delta').innerHTML = soinsTerminesMois.length > 0
+      ? `<span class="text-ink-500">${fmtMoney(caRealiseMois)} de CA réalisé</span>`
+      : `<span class="text-ink-400">—</span>`;
+    document.getElementById('stat-traites').textContent = mailsAvisMois.length > 0
+      ? `${mailsAvisMois.length} mail${mailsAvisMois.length > 1 ? 's' : ''} d'avis envoyé${mailsAvisMois.length > 1 ? 's' : ''}`
+      : 'Aucun mail d\'avis envoyé';
 
     document.getElementById('stat-ca-attente').textContent = fmtMoney(caAttente);
     document.getElementById('stat-attente-count').textContent = `${pending.length} devis · tous mois confondus`;
@@ -2635,16 +2630,15 @@ Règles :
       const { start: ms, end: me } = getMonthRange(currentOffset - i);
       const envoyesMois = allDevis.filter(d => inMonthBy(d.date_envoi, ms, me));
       const acceptesMois = allDevis.filter(d => d.status === 'Accepté' && inMonthBy(d.dateAcceptation, ms, me));
-      const refusesMois = allDevis.filter(d => d.status === 'Refusé' && inMonthBy(d.dateRefus, ms, me));
-      const sansReponseMois = allDevis.filter(d => d.status === 'Sans réponse' && inMonthBy(d.dateSansReponse, ms, me));
+      const soinsTerminesMoisChart = allDevis.filter(d => d.soinTermine && inMonthBy(d.dateSoinTermine, ms, me));
       months.push({
         label: ms.toLocaleDateString('fr-FR', { month: 'short' }).replace('.', ''),
         envoye: envoyesMois.reduce((s, d) => s + (d.montant || 0), 0),
         accepte: acceptesMois.reduce((s, d) => s + (d.montant || 0), 0),
         envoyeCount: envoyesMois.length,
         accepteCount: acceptesMois.length,
-        decidesCount: acceptesMois.length + refusesMois.length + sansReponseMois.length,
-        isCurrent: (currentOffset - i) === 0
+        caRealise: soinsTerminesMoisChart.reduce((s, d) => s + (d.montant || 0), 0),
+        soinsTerminesCount: soinsTerminesMoisChart.length
       });
     }
     const maxVal = Math.max(1, ...months.map(m => Math.max(m.envoye, m.accepte)));
@@ -2757,17 +2751,13 @@ Règles :
       else { gDotE.setAttribute('opacity', '0'); }
       if (m.accepte > 0) { gDotA.setAttribute('cx', pA.x.toFixed(1)); gDotA.setAttribute('cy', pA.y.toFixed(1)); gDotA.setAttribute('opacity', '1'); }
       else { gDotA.setAttribute('opacity', '0'); }
-      // Taux conversion events-based : acceptés du mois / décidés du mois
-      const pct = m.decidesCount > 0 ? Math.round((m.accepteCount / m.decidesCount) * 100) : null;
+      // v2.5.10 — Tooltip simplifié : Envoyé / Accepté / Soins faits
       const monthCap = m.label.charAt(0).toUpperCase() + m.label.slice(1);
       tip.innerHTML = `
         <div style="font-weight:600;margin-bottom:4px;">${monthCap}</div>
         <div style="display:flex;align-items:center;gap:6px;"><span style="width:8px;height:2px;background:#94999a;display:inline-block;border-radius:1px"></span><span style="color:#9e9ea3">Envoyé</span> <span style="margin-left:auto;font-variant-numeric:tabular-nums">${fmtMoney(m.envoye)} <span style="color:#6e6e72">· ${m.envoyeCount}</span></span></div>
         <div style="display:flex;align-items:center;gap:6px;margin-top:2px;"><span style="width:8px;height:2px;background:#30D158;display:inline-block;border-radius:1px"></span><span style="color:#9e9ea3">Accepté</span> <span style="margin-left:auto;font-variant-numeric:tabular-nums">${fmtMoney(m.accepte)} <span style="color:#6e6e72">· ${m.accepteCount}</span></span></div>
-        ${m.isCurrent
-          ? `<div style="margin-top:4px;padding-top:4px;border-top:1px solid #2c2c2e;color:#9e9ea3;font-style:italic;">Mois en cours · % à confirmer en fin de mois</div>`
-          : (pct !== null ? `<div style="margin-top:4px;padding-top:4px;border-top:1px solid #2c2c2e;color:#9e9ea3;">Acceptation · <span style="color:#fff;font-weight:600">${pct}%</span> <span style="color:#6e6e72">(${m.accepteCount}/${m.decidesCount} décidés)</span></div>` : '')
-        }
+        ${m.soinsTerminesCount > 0 ? `<div style="display:flex;align-items:center;gap:6px;margin-top:2px;"><span style="color:#30D158;font-weight:700;width:8px;display:inline-block;text-align:center;line-height:1">✓</span><span style="color:#9e9ea3">Soins faits</span> <span style="margin-left:auto;font-variant-numeric:tabular-nums">${fmtMoney(m.caRealise)} <span style="color:#6e6e72">· ${m.soinsTerminesCount}</span></span></div>` : ''}
       `;
       const tipRect = tip.getBoundingClientRect();
       const tipW = tipRect.width || 160;
