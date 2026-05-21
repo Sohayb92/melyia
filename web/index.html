@@ -308,6 +308,20 @@
         </div>
       </div>
 
+      <!-- Soins à vérifier (badge passif si patients acceptés > 30j sans soin marqué) -->
+      <div id="soins-to-check-card" class="mb-4 p-4 rounded-2xl bg-warning/10 border border-warning/30 cursor-pointer hover:bg-warning/15 transition-colors hidden">
+        <div class="flex items-center gap-3">
+          <div class="w-10 h-10 rounded-full bg-warning/20 flex items-center justify-center flex-shrink-0">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-warning"><path d="M9 12l2 2 4-4"/><circle cx="12" cy="12" r="10"/></svg>
+          </div>
+          <div class="flex-1 min-w-0">
+            <div class="text-[14px] font-semibold text-ink-900"><span id="soins-to-check-count">0</span> soin<span id="soins-to-check-plural">s</span> à vérifier</div>
+            <div class="text-[12px] text-ink-600 mt-0.5">Patients acceptés il y a 30j+ — coche si le soin est fait pour déclencher le mail d'avis Google</div>
+          </div>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-warning flex-shrink-0"><polyline points="9 18 15 12 9 6"/></svg>
+        </div>
+      </div>
+
       <!-- Devis list -->
       <div class="mb-3 px-1 flex items-center justify-between gap-3">
         <h2 class="text-[18px] font-semibold tracking-tight">Devis</h2>
@@ -2027,6 +2041,21 @@ Règles :
       document.getElementById('stat-rate-detail').textContent = 'Aucun encore';
     }
 
+    // v2.5.8 — Badge "Soins à vérifier"
+    try {
+      const soinsToCheck = await getSoinsToCheck();
+      const card = document.getElementById('soins-to-check-card');
+      if (soinsToCheck.length === 0) {
+        card.classList.add('hidden');
+      } else {
+        card.classList.remove('hidden');
+        document.getElementById('soins-to-check-count').textContent = soinsToCheck.length;
+        document.getElementById('soins-to-check-plural').textContent = soinsToCheck.length > 1 ? 's' : '';
+      }
+    } catch (e) {
+      console.error('[Melyia] getSoinsToCheck failed:', e);
+    }
+
     // Vue "Aujourd'hui" : compter les devis créés aujourd'hui + leur CA + patients créés aujourd'hui
     const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
     const todayDevis = all.filter(d => d.created_at && new Date(d.created_at).getTime() >= todayStart.getTime());
@@ -2465,12 +2494,20 @@ Règles :
     document.getElementById('stat-ca-accepte-delta').innerHTML = formatDelta(caAccepte, caAcceptePrev);
     document.getElementById('stat-accepte-count').textContent = `${acceptes.length} accepté${acceptes.length > 1 ? 's' : ''} ce mois`;
 
-    document.getElementById('stat-taux').textContent = taux !== null ? taux + '%' : '—';
-    document.getElementById('stat-taux-delta').innerHTML = formatDelta(taux, tauxPrev, true);
-    if (decides > 0) {
-      document.getElementById('stat-traites').textContent = `${acceptes.length} / ${decides} décidé${decides > 1 ? 's' : ''} ce mois`;
+    // v2.5.8 — Mois en cours = count brut (pas de % trompeur), mois passés = % events-based
+    const isCurrentMonth = (offset === 0);
+    if (isCurrentMonth) {
+      document.getElementById('stat-taux').textContent = acceptes.length;
+      document.getElementById('stat-taux-delta').innerHTML = `<span class="text-ink-400">accepté${acceptes.length > 1 ? 's' : ''} ce mois</span>`;
+      document.getElementById('stat-traites').textContent = `% à confirmer en fin de mois`;
     } else {
-      document.getElementById('stat-traites').textContent = 'Aucune décision ce mois';
+      document.getElementById('stat-taux').textContent = taux !== null ? taux + '%' : '—';
+      document.getElementById('stat-taux-delta').innerHTML = formatDelta(taux, tauxPrev, true);
+      if (decides > 0) {
+        document.getElementById('stat-traites').textContent = `${acceptes.length} / ${decides} décidé${decides > 1 ? 's' : ''} ce mois`;
+      } else {
+        document.getElementById('stat-traites').textContent = 'Aucune décision ce mois';
+      }
     }
 
     document.getElementById('stat-ca-attente').textContent = fmtMoney(caAttente);
@@ -2555,7 +2592,8 @@ Règles :
         accepte: acceptesMois.reduce((s, d) => s + (d.montant || 0), 0),
         envoyeCount: envoyesMois.length,
         accepteCount: acceptesMois.length,
-        decidesCount: acceptesMois.length + refusesMois.length + sansReponseMois.length
+        decidesCount: acceptesMois.length + refusesMois.length + sansReponseMois.length,
+        isCurrent: (currentOffset - i) === 0
       });
     }
     const maxVal = Math.max(1, ...months.map(m => Math.max(m.envoye, m.accepte)));
@@ -2675,7 +2713,10 @@ Règles :
         <div style="font-weight:600;margin-bottom:4px;">${monthCap}</div>
         <div style="display:flex;align-items:center;gap:6px;"><span style="width:8px;height:2px;background:#94999a;display:inline-block;border-radius:1px"></span><span style="color:#9e9ea3">Envoyé</span> <span style="margin-left:auto;font-variant-numeric:tabular-nums">${fmtMoney(m.envoye)} <span style="color:#6e6e72">· ${m.envoyeCount}</span></span></div>
         <div style="display:flex;align-items:center;gap:6px;margin-top:2px;"><span style="width:8px;height:2px;background:#30D158;display:inline-block;border-radius:1px"></span><span style="color:#9e9ea3">Accepté</span> <span style="margin-left:auto;font-variant-numeric:tabular-nums">${fmtMoney(m.accepte)} <span style="color:#6e6e72">· ${m.accepteCount}</span></span></div>
-        ${pct !== null ? `<div style="margin-top:4px;padding-top:4px;border-top:1px solid #2c2c2e;color:#9e9ea3;">Acceptation · <span style="color:#fff;font-weight:600">${pct}%</span> <span style="color:#6e6e72">(${m.accepteCount}/${m.decidesCount} décidés)</span></div>` : ''}
+        ${m.isCurrent
+          ? `<div style="margin-top:4px;padding-top:4px;border-top:1px solid #2c2c2e;color:#9e9ea3;font-style:italic;">Mois en cours · % à confirmer en fin de mois</div>`
+          : (pct !== null ? `<div style="margin-top:4px;padding-top:4px;border-top:1px solid #2c2c2e;color:#9e9ea3;">Acceptation · <span style="color:#fff;font-weight:600">${pct}%</span> <span style="color:#6e6e72">(${m.accepteCount}/${m.decidesCount} décidés)</span></div>` : '')
+        }
       `;
       const tipRect = tip.getBoundingClientRect();
       const tipW = tipRect.width || 160;
@@ -4512,6 +4553,26 @@ Bien cordialement,
   // ========================================
   // GOOGLE REVIEW AUTO-MAIL (v2.5.6)
   // ========================================
+  // v2.5.8 — Liste des devis acceptés depuis 30j+ sans soin marqué terminé.
+  async function getSoinsToCheck() {
+    const delay = Math.max(7, parseInt(getSetting('soinsCheckDelay', '30'), 10) || 30);
+    const now = Date.now();
+    const cutoff = now - delay * 24 * 60 * 60 * 1000;
+    await refreshPatientsCache();
+    const all = await db.devis.toArray();
+    return all.filter(d => {
+      if (d.status !== 'Accepté') return false;
+      if (d.soinTermine) return false;
+      if (!d.dateAcceptation) return false;
+      if (new Date(d.dateAcceptation).getTime() > cutoff) return false;
+      if (d.soinCheckIgnoreUntil && new Date(d.soinCheckIgnoreUntil).getTime() > now) return false;
+      const p = d.patient_id ? getCachedPatient(d.patient_id) : null;
+      if (!p || !p.email) return false;
+      if (p.noContact === true) return false;
+      return true;
+    });
+  }
+
   async function getGoogleReviewCandidates() {
     const delay = Math.max(1, parseInt(getSetting('googleReviewDelay', '14'), 10) || 14);
     const now = Date.now();
@@ -5029,7 +5090,7 @@ Bien cordialement,
           const idx = parseInt(cb.dataset.idx, 10);
           const devis = staleDevis[idx];
           if (devis) {
-            await db.devis.update(devis.id, { status: 'Sans réponse' });
+            await db.devis.update(devis.id, { status: 'Sans réponse', dateSansReponse: new Date().toISOString() });
             count++;
           }
         }
@@ -5041,6 +5102,78 @@ Bien cordialement,
       });
     });
   }
+
+  // v2.5.8 — Modale "Soins à vérifier"
+  async function openSoinsToCheckModal() {
+    const soins = await getSoinsToCheck();
+    if (soins.length === 0) {
+      toast('Aucun soin à vérifier pour le moment', 'info');
+      return;
+    }
+    const rows = soins.map((d, idx) => {
+      const p = getCachedPatient(d.patient_id);
+      const name = p ? patientFullName(p) : 'Patient inconnu';
+      const daysSinceAccept = Math.floor((Date.now() - new Date(d.dateAcceptation).getTime()) / 86400000);
+      return `
+        <div class="grouped-row block">
+          <div class="flex items-center gap-3">
+            <div class="flex-1 min-w-0">
+              <div class="text-[14px] font-medium truncate">${esc(name)}</div>
+              <div class="text-[12px] text-ink-500 mt-0.5">${esc(d.soins || '')} ${d.montant ? '· ' + fmtMoney(d.montant) : ''} · RDV pris il y a ${daysSinceAccept}j</div>
+            </div>
+            <div class="flex flex-col sm:flex-row gap-2 flex-shrink-0">
+              <button class="soin-fait-btn btn btn-success btn-sm" data-idx="${idx}">✓ Soin fait</button>
+              <button class="soin-pas-encore-btn btn btn-secondary btn-sm" data-idx="${idx}">Pas encore</button>
+            </div>
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    const html = `
+      <div class="flex items-center justify-between mb-4">
+        <button id="soins-cancel" class="text-[16px] text-ink-500 font-normal">Fermer</button>
+        <div class="text-[17px] font-semibold">Soins à vérifier</div>
+        <div class="w-16"></div>
+      </div>
+      <p class="text-[13px] text-ink-500 mb-4">Ces patients ont accepté leur devis il y a 30 jours ou plus. Coche <strong>"Soin fait"</strong> pour déclencher le mail d'avis Google (J+14 plus tard). Coche <strong>"Pas encore"</strong> pour repousser de 15 jours (cas étalés sur plusieurs séances).</p>
+      <div class="grouped-list">${rows}</div>
+    `;
+    document.getElementById('modal-detail-content').innerHTML = html;
+    document.getElementById('modal-detail-overlay').classList.remove('hidden');
+    document.body.style.overflow = 'hidden';
+
+    document.getElementById('soins-cancel').addEventListener('click', closeDetail);
+    document.getElementById('modal-detail-overlay').addEventListener('click', (e) => {
+      if (e.target.id === 'modal-detail-overlay') closeDetail();
+    });
+    document.querySelectorAll('.soin-fait-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const idx = parseInt(btn.dataset.idx, 10);
+        const devis = soins[idx];
+        if (!devis) return;
+        await db.devis.update(devis.id, { soinTermine: true, dateSoinTermine: new Date().toISOString() });
+        toast('Soin marqué terminé ✓ (mail avis dans 14j)', 'success');
+        scheduleAutoBackup();
+        await openSoinsToCheckModal();
+      });
+    });
+    document.querySelectorAll('.soin-pas-encore-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const idx = parseInt(btn.dataset.idx, 10);
+        const devis = soins[idx];
+        if (!devis) return;
+        const ignoreUntil = new Date(Date.now() + 15 * 24 * 60 * 60 * 1000).toISOString();
+        await db.devis.update(devis.id, { soinCheckIgnoreUntil: ignoreUntil });
+        toast('Repoussé de 15 jours', 'info');
+        await openSoinsToCheckModal();
+      });
+    });
+  }
+
+  document.getElementById('soins-to-check-card').addEventListener('click', () => {
+    openSoinsToCheckModal();
+  });
 
   async function init() {
     await refreshPatientsCache();
