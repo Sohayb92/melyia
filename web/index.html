@@ -334,6 +334,12 @@
           <div class="segmented-item" data-status="En attente">En attente</div>
           <div class="segmented-item" data-status="Relancé">Relancés</div>
           <div class="segmented-item" data-status="Accepté">Acceptés</div>
+          <div class="segmented-item" data-status="non-signes">Non signés</div>
+        </div>
+        <div id="non-signes-chips" class="hidden mt-2.5 flex flex-wrap gap-2 px-1">
+          <button data-sub="all" class="non-signes-chip px-3 py-1.5 rounded-full text-[12px] font-medium border transition-colors">Tous <span class="ml-1 tabular-nums opacity-70" id="chip-all-count">0</span></button>
+          <button data-sub="Refusé" class="non-signes-chip px-3 py-1.5 rounded-full text-[12px] font-medium border transition-colors">Refusés <span class="ml-1 tabular-nums opacity-70" id="chip-refused-count">0</span></button>
+          <button data-sub="Sans réponse" class="non-signes-chip px-3 py-1.5 rounded-full text-[12px] font-medium border transition-colors">Sans réponse <span class="ml-1 tabular-nums opacity-70" id="chip-noresponse-count">0</span></button>
         </div>
       </div>
 
@@ -476,7 +482,7 @@
         <div class="bg-white border border-ink-200 rounded-2xl p-3 md:p-4" style="border-left: 3px solid #FF9F0A">
           <div class="text-[10px] md:text-[11px] uppercase tracking-wider text-warning font-semibold flex items-center gap-1.5">
             <span class="w-1.5 h-1.5 rounded-full bg-warning"></span>
-            <span class="hidden sm:inline">Pipeline ouvert</span><span class="sm:hidden">Pipeline</span>
+            <span class="hidden sm:inline">En attente</span><span class="sm:hidden">Attente</span>
           </div>
           <div id="stat-ca-attente" class="text-[16px] md:text-[20px] font-semibold tabular-nums mt-1.5 leading-none">—</div>
           <div id="stat-attente-count" class="text-[11px] text-ink-500 mt-1 truncate">—</div>
@@ -2006,6 +2012,7 @@ Règles :
   // DASHBOARD RENDER
   // ========================================
   let currentFilterStatus = '';
+  let currentNonSignesSubFilter = 'all';
   let currentSearch = '';
 
   async function renderDashboard() {
@@ -2173,7 +2180,23 @@ Règles :
       if (dateDiff !== 0) return dateDiff;
       return (new Date(b.created_at || 0).getTime()) - (new Date(a.created_at || 0).getTime());
     });
-    if (currentFilterStatus) filtered = filtered.filter(d => d.status === currentFilterStatus);
+    if (currentFilterStatus === 'non-signes') {
+      filtered = filtered.filter(d => d.status === 'Refusé' || d.status === 'Sans réponse');
+      if (currentNonSignesSubFilter !== 'all') {
+        filtered = filtered.filter(d => d.status === currentNonSignesSubFilter);
+      }
+    } else if (currentFilterStatus) {
+      filtered = filtered.filter(d => d.status === currentFilterStatus);
+    }
+    const refusedCount = all.filter(d => d.status === 'Refusé').length;
+    const noResponseCount = all.filter(d => d.status === 'Sans réponse').length;
+    const allClosedCount = refusedCount + noResponseCount;
+    const cAll = document.getElementById('chip-all-count');
+    const cRef = document.getElementById('chip-refused-count');
+    const cNor = document.getElementById('chip-noresponse-count');
+    if (cAll) cAll.textContent = allClosedCount;
+    if (cRef) cRef.textContent = refusedCount;
+    if (cNor) cNor.textContent = noResponseCount;
     if (currentSearch) filtered = filtered.filter(d => {
       const pInfo = devisPatientDisplay(d);
       return ((pInfo.nom || '') + ' ' + (pInfo.prenom || '') + ' ' + (pInfo.email || '') + ' ' + (d.soins || '')).toLowerCase().includes(currentSearch);
@@ -2275,15 +2298,43 @@ Règles :
     });
   }
 
-  // Filter chips
+  function updateNonSignesChipsUI() {
+    document.querySelectorAll('.non-signes-chip').forEach(chip => {
+      const isActive = chip.dataset.sub === currentNonSignesSubFilter;
+      if (isActive) {
+        chip.className = 'non-signes-chip px-3 py-1.5 rounded-full text-[12px] font-medium border transition-colors bg-accent text-white border-accent';
+      } else {
+        chip.className = 'non-signes-chip px-3 py-1.5 rounded-full text-[12px] font-medium border transition-colors bg-white text-ink-700 border-ink-200 hover:bg-ink-50';
+      }
+    });
+  }
+
+  // Filter chips (segmented + sous-chips "Non signés")
   document.querySelectorAll('#status-filter .segmented-item').forEach(item => {
     item.addEventListener('click', () => {
       document.querySelectorAll('#status-filter .segmented-item').forEach(i => i.classList.remove('active'));
       item.classList.add('active');
       currentFilterStatus = item.dataset.status;
+      const chipsContainer = document.getElementById('non-signes-chips');
+      if (currentFilterStatus === 'non-signes') {
+        chipsContainer.classList.remove('hidden');
+        currentNonSignesSubFilter = 'all';
+        updateNonSignesChipsUI();
+      } else {
+        chipsContainer.classList.add('hidden');
+      }
       renderDashboard();
     });
   });
+
+  document.querySelectorAll('.non-signes-chip').forEach(chip => {
+    chip.addEventListener('click', () => {
+      currentNonSignesSubFilter = chip.dataset.sub;
+      updateNonSignesChipsUI();
+      renderDashboard();
+    });
+  });
+  updateNonSignesChipsUI();
   document.getElementById('filter-search').addEventListener('input', (e) => {
     currentSearch = e.target.value.toLowerCase();
     renderDashboard();
@@ -2511,7 +2562,7 @@ Règles :
     }
 
     document.getElementById('stat-ca-attente').textContent = fmtMoney(caAttente);
-    document.getElementById('stat-attente-count').textContent = `${pending.length} devis ouvert${pending.length > 1 ? 's' : ''} · tous mois`;
+    document.getElementById('stat-attente-count').textContent = `${pending.length} devis · tous mois confondus`;
 
     // Top 5 patients du mois (cohorte d'envoi du mois)
     const byPatient = new Map();
