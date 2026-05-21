@@ -462,10 +462,10 @@
         <div class="bg-white border border-ink-200 rounded-2xl p-3 md:p-4" style="border-left: 3px solid #FF9F0A">
           <div class="text-[10px] md:text-[11px] uppercase tracking-wider text-warning font-semibold flex items-center gap-1.5">
             <span class="w-1.5 h-1.5 rounded-full bg-warning"></span>
-            <span class="hidden sm:inline">En attente</span><span class="sm:hidden">Attente</span>
+            <span class="hidden sm:inline">Pipeline ouvert</span><span class="sm:hidden">Pipeline</span>
           </div>
           <div id="stat-ca-attente" class="text-[16px] md:text-[20px] font-semibold tabular-nums mt-1.5 leading-none">—</div>
-          <div id="stat-attente-count" class="text-[11px] text-ink-500 mt-1 truncate">— pending</div>
+          <div id="stat-attente-count" class="text-[11px] text-ink-500 mt-1 truncate">—</div>
         </div>
       </div>
 
@@ -675,6 +675,51 @@
           </label>
         </div>
       </div>
+
+      <div class="mb-2 px-1 text-[12px] uppercase tracking-wider text-ink-500 font-semibold">Avis Google auto</div>
+      <div class="grouped-list mb-2">
+        <div class="grouped-row">
+          <div class="flex-1">
+            <div class="text-[15px] font-medium">Activer le module</div>
+            <div class="text-[13px] text-ink-500 mt-0.5">Mail d'avis envoyé automatiquement aux patients après que tu aies coché "Soin terminé" sur leur devis (technique évacuation interne).</div>
+          </div>
+          <label class="switch flex-shrink-0">
+            <input type="checkbox" id="setting-google-review-enabled"/>
+            <span class="switch-slider"></span>
+          </label>
+        </div>
+        <div class="grouped-row block">
+          <div class="text-[15px] font-medium mb-1">Lien d'avis Google</div>
+          <div class="text-[13px] text-ink-500 mb-2">URL de ta fiche Google Business → "Demander des avis" → "Copier le lien". Format : <code>https://g.page/r/.../review</code></div>
+          <input id="setting-google-review-url" type="url" placeholder="https://g.page/r/..." class="input !text-[13px] font-mono"/>
+        </div>
+        <div class="grouped-row">
+          <div class="flex-1">
+            <div class="text-[15px] font-medium">Délai après "Soin terminé"</div>
+            <div class="text-[13px] text-ink-500 mt-0.5">14 jours est un bon défaut.</div>
+          </div>
+          <div class="flex items-center gap-2">
+            <input id="setting-google-review-delay" type="number" min="1" max="60" value="14" class="input !h-9 !w-20 !text-center !text-[15px]"/>
+            <span class="text-[14px] text-ink-500">jours</span>
+          </div>
+        </div>
+        <div class="grouped-row block">
+          <div class="flex items-center justify-between mb-1">
+            <div class="text-[15px] font-medium">Template mail d'avis</div>
+            <button type="button" data-reset-template="googleReviewTemplate" class="text-[12px] text-accent hover:underline">Réinitialiser</button>
+          </div>
+          <div class="text-[13px] text-ink-500 mb-2">Variables : <code>{{salutation}}</code> · <code>{{prenom}}</code> · <code>{{nom}}</code> · <code>{{soins}}</code> · <code>{{lien_google}}</code> · <code>{{doctor}}</code> + séparateur signature <code>---</code>.</div>
+          <textarea id="setting-google-review-template" rows="10" class="input !text-[13px]"></textarea>
+        </div>
+        <div class="grouped-row">
+          <div class="flex-1">
+            <div class="text-[15px] font-medium">File d'attente</div>
+            <div class="text-[13px] text-ink-500 mt-0.5" id="google-review-queue-status">—</div>
+          </div>
+          <button type="button" id="test-google-review-btn" class="btn btn-secondary btn-sm">Forcer envoi</button>
+        </div>
+      </div>
+      <p class="text-[12px] text-ink-500 mb-6 px-1">1 mail max par devis. Patients marqués STOP exclus. Les mails partent à la 1ère ouverture du jour de Mélyia.</p>
 
       <div class="mb-2 px-1 text-[12px] uppercase tracking-wider text-ink-500 font-semibold">Données</div>
       <div class="grouped-list mb-6">
@@ -1121,6 +1166,27 @@
     relances: '++id, devis_id, date',
     maintenances: '++id, patient_id, type, intervalle_mois, prochain_rappel, actif',
     rappels_maintenance: '++id, maintenance_id, date'
+  });
+  db.version(4).stores({
+    patients: '++id, nom, prenom, email, telephone, created_at',
+    devis: '++id, patient_id, status, date_envoi, dateAcceptation, dateRefus, dateSansReponse, soinTermine, dateSoinTermine, googleReviewMailSent, date_relance_prevue, montant',
+    relances: '++id, devis_id, date',
+    maintenances: '++id, patient_id, type, intervalle_mois, prochain_rappel, actif',
+    rappels_maintenance: '++id, maintenance_id, date'
+  }).upgrade(async tx => {
+    // Migration v3 → v4 : ajout des dates d'événement (acceptation/refus/sansReponse)
+    // + flags soin terminé et mail avis envoyé. Backfill rétroactif :
+    //   - Pour les devis déjà décidés, on initialise la date à date_envoi (best-guess faute de mieux)
+    //   - Le user peut corriger à la main si besoin (vue détail devis)
+    const devisTable = tx.table('devis');
+    const allDevis = await devisTable.toArray();
+    for (const d of allDevis) {
+      const update = { soinTermine: false, googleReviewMailSent: false };
+      if (d.status === 'Accepté' && !d.dateAcceptation) update.dateAcceptation = d.date_envoi;
+      if (d.status === 'Refusé' && !d.dateRefus) update.dateRefus = d.date_envoi;
+      if (d.status === 'Sans réponse' && !d.dateSansReponse) update.dateSansReponse = d.date_envoi;
+      await devisTable.update(d.id, update);
+    }
   });
 
   // ========================================
@@ -1837,6 +1903,11 @@ Règles :
           ${devis.status === 'En attente' ? `<button class="action-btn btn btn-secondary w-full" data-action="relancer">Marquer comme relancé (sans envoyer de mail)</button>` : ''}
           ${devis.status === 'Relancé' ? `<button class="action-btn btn btn-secondary w-full" data-action="noresponse">Sans réponse</button>` : ''}
         ` : `
+          ${devis.status === 'Accepté' ? (
+            !devis.soinTermine
+              ? `<button class="action-btn btn btn-primary w-full" data-action="soin-termine"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg> Marquer soin terminé</button>`
+              : `<div class="flex items-center justify-between gap-2 p-3 rounded-xl bg-success/10 border border-success/30"><div class="text-[13px] text-ink-700"><span class="font-semibold text-success">✓ Soin terminé</span>${devis.dateSoinTermine ? ` le ${formatDate(devis.dateSoinTermine)}` : ''}</div><button class="action-btn text-[12px] text-ink-500 hover:text-ink-900 underline" data-action="undo-soin-termine">annuler</button></div>`
+          ) : ''}
           <button class="action-btn btn btn-secondary w-full" data-action="reopen">↺ Remettre en attente</button>
         `}
       </div>
@@ -1864,18 +1935,24 @@ Règles :
           await db.devis.update(id, { status: 'Relancé', date_relance_prevue: addDays(new Date(), abandonDays) });
           toast('Relance enregistrée', 'success');
         } else if (action === 'accepted') {
-          await db.devis.update(id, { status: 'Accepté' });
-          toast('Devis accepté', 'success');
+          await db.devis.update(id, { status: 'Accepté', dateAcceptation: new Date().toISOString() });
+          toast('Devis accepté · RDV pris', 'success');
         } else if (action === 'refused') {
-          await db.devis.update(id, { status: 'Refusé' });
+          await db.devis.update(id, { status: 'Refusé', dateRefus: new Date().toISOString() });
           toast('Devis refusé', 'info');
         } else if (action === 'noresponse') {
-          await db.devis.update(id, { status: 'Sans réponse' });
+          await db.devis.update(id, { status: 'Sans réponse', dateSansReponse: new Date().toISOString() });
           toast('Marqué sans réponse', 'info');
         } else if (action === 'reopen') {
           const relanceDays = parseInt(getSetting('relanceDays', '21'), 10) || 21;
-          await db.devis.update(id, { status: 'En attente', date_relance_prevue: addDays(new Date(), relanceDays) });
+          await db.devis.update(id, { status: 'En attente', date_relance_prevue: addDays(new Date(), relanceDays), dateAcceptation: null, dateRefus: null, dateSansReponse: null });
           toast('Remis en attente', 'success');
+        } else if (action === 'soin-termine') {
+          await db.devis.update(id, { soinTermine: true, dateSoinTermine: new Date().toISOString() });
+          toast('Soin marqué terminé', 'success');
+        } else if (action === 'undo-soin-termine') {
+          await db.devis.update(id, { soinTermine: false, dateSoinTermine: null });
+          toast('Soin remis non terminé', 'info');
         }
         closeDetail();
         renderDashboard();
@@ -2129,7 +2206,7 @@ Règles :
             await db.devis.update(id, { status: 'Relancé', date_relance_prevue: addDays(new Date(), abandonDays) });
             toast('Relance enregistrée', 'success');
           } else {
-            await db.devis.update(id, { status: 'Sans réponse' });
+            await db.devis.update(id, { status: 'Sans réponse', dateSansReponse: new Date().toISOString() });
             toast('Marqué sans réponse', 'info');
           }
           renderDashboard();
@@ -2346,57 +2423,62 @@ Règles :
     if (offset >= 0) { nextBtn.disabled = true; nextBtn.style.opacity = '0.3'; nextBtn.style.cursor = 'not-allowed'; }
     else { nextBtn.disabled = false; nextBtn.style.opacity = '1'; nextBtn.style.cursor = 'pointer'; }
 
-    // Filtrage devis par date_envoi
-    const inRange = (d, s, e) => {
-      const t = new Date(d.date_envoi).getTime();
+    // ✨ v2.5.6 : Bascule "events-based" — chaque KPI mensuel est compté sur la date de SON ÉVÉNEMENT,
+    //   pas sur la date d'envoi du devis. Les mois passés se figent proprement.
+    //   - Envois du mois → date_envoi
+    //   - Acceptés du mois → dateAcceptation (= jour où le patient a pris RDV)
+    //   - Refusés / Sans réponse du mois → dateRefus / dateSansReponse
+    //   - Pipeline en attente → sort de la dimension temps (compteur live, pas mensuel)
+    const inRangeBy = (dateStr, s, e) => {
+      if (!dateStr) return false;
+      const t = new Date(dateStr).getTime();
       return t >= s.getTime() && t < e.getTime();
     };
-    const monthDevis = all.filter(d => inRange(d, start, end));
-    const prevDevis = all.filter(d => inRange(d, prevStart, prevEnd));
+    const monthDevisEnvoyes = all.filter(d => inRangeBy(d.date_envoi, start, end));
+    const acceptes = all.filter(d => d.status === 'Accepté' && inRangeBy(d.dateAcceptation, start, end));
+    const refuses = all.filter(d => d.status === 'Refusé' && inRangeBy(d.dateRefus, start, end));
+    const sansReponse = all.filter(d => d.status === 'Sans réponse' && inRangeBy(d.dateSansReponse, start, end));
+    const decides = acceptes.length + refuses.length + sansReponse.length;
 
-    // Calculs ce mois
-    const caEnvoye = monthDevis.reduce((s, d) => s + (d.montant || 0), 0);
-    const acceptes = monthDevis.filter(d => d.status === 'Accepté');
-    const refuses = monthDevis.filter(d => d.status === 'Refusé');
-    const sansReponse = monthDevis.filter(d => d.status === 'Sans réponse');
-    const traites = acceptes.length + refuses.length + sansReponse.length;
+    const caEnvoye = monthDevisEnvoyes.reduce((s, d) => s + (d.montant || 0), 0);
     const caAccepte = acceptes.reduce((s, d) => s + (d.montant || 0), 0);
-    // Taux de conversion = accepté / total envoyé sur le mois (KPI business honnête)
-    const taux = monthDevis.length > 0 ? Math.round((acceptes.length / monthDevis.length) * 100) : null;
-    const pending = monthDevis.filter(d => d.status === 'En attente' || d.status === 'Relancé');
+    const taux = decides > 0 ? Math.round((acceptes.length / decides) * 100) : null;
+    const pending = all.filter(d => d.status === 'En attente' || d.status === 'Relancé');
     const caAttente = pending.reduce((s, d) => s + (d.montant || 0), 0);
 
-    // Calculs mois précédent (pour delta)
-    const caEnvoyePrev = prevDevis.reduce((s, d) => s + (d.montant || 0), 0);
-    const acceptesPrev = prevDevis.filter(d => d.status === 'Accepté');
+    // Mois précédent (events-based)
+    const monthDevisEnvoyesPrev = all.filter(d => inRangeBy(d.date_envoi, prevStart, prevEnd));
+    const acceptesPrev = all.filter(d => d.status === 'Accepté' && inRangeBy(d.dateAcceptation, prevStart, prevEnd));
+    const refusesPrev = all.filter(d => d.status === 'Refusé' && inRangeBy(d.dateRefus, prevStart, prevEnd));
+    const sansReponsePrev = all.filter(d => d.status === 'Sans réponse' && inRangeBy(d.dateSansReponse, prevStart, prevEnd));
+    const decidesPrev = acceptesPrev.length + refusesPrev.length + sansReponsePrev.length;
+    const caEnvoyePrev = monthDevisEnvoyesPrev.reduce((s, d) => s + (d.montant || 0), 0);
     const caAcceptePrev = acceptesPrev.reduce((s, d) => s + (d.montant || 0), 0);
-    const tauxPrev = prevDevis.length > 0 ? Math.round((acceptesPrev.length / prevDevis.length) * 100) : null;
+    const tauxPrev = decidesPrev > 0 ? Math.round((acceptesPrev.length / decidesPrev) * 100) : null;
 
     // Render cards
     document.getElementById('stat-ca-envoye').textContent = fmtMoney(caEnvoye);
     document.getElementById('stat-ca-envoye-delta').innerHTML = formatDelta(caEnvoye, caEnvoyePrev);
-    document.getElementById('stat-devis-count').textContent = `${monthDevis.length} devis envoyé${monthDevis.length > 1 ? 's' : ''}`;
+    document.getElementById('stat-devis-count').textContent = `${monthDevisEnvoyes.length} devis envoyé${monthDevisEnvoyes.length > 1 ? 's' : ''}`;
 
     document.getElementById('stat-ca-accepte').textContent = fmtMoney(caAccepte);
     document.getElementById('stat-ca-accepte-delta').innerHTML = formatDelta(caAccepte, caAcceptePrev);
-    document.getElementById('stat-accepte-count').textContent = `${acceptes.length} accepté${acceptes.length > 1 ? 's' : ''}`;
+    document.getElementById('stat-accepte-count').textContent = `${acceptes.length} accepté${acceptes.length > 1 ? 's' : ''} ce mois`;
 
     document.getElementById('stat-taux').textContent = taux !== null ? taux + '%' : '—';
     document.getElementById('stat-taux-delta').innerHTML = formatDelta(taux, tauxPrev, true);
-    // Sous-label : ratio explicite + pipeline en attente
-    if (monthDevis.length > 0) {
-      const pendingPart = pending.length > 0 ? ` · ${pending.length} en attente` : '';
-      document.getElementById('stat-traites').textContent = `${acceptes.length} / ${monthDevis.length} accepté${acceptes.length > 1 ? 's' : ''}${pendingPart}`;
+    if (decides > 0) {
+      document.getElementById('stat-traites').textContent = `${acceptes.length} / ${decides} décidé${decides > 1 ? 's' : ''} ce mois`;
     } else {
-      document.getElementById('stat-traites').textContent = '—';
+      document.getElementById('stat-traites').textContent = 'Aucune décision ce mois';
     }
 
     document.getElementById('stat-ca-attente').textContent = fmtMoney(caAttente);
-    document.getElementById('stat-attente-count').textContent = `${pending.length} en attente / relancé${pending.length > 1 ? 's' : ''}`;
+    document.getElementById('stat-attente-count').textContent = `${pending.length} devis ouvert${pending.length > 1 ? 's' : ''} · tous mois`;
 
-    // Top 5 patients du mois
+    // Top 5 patients du mois (cohorte d'envoi du mois)
     const byPatient = new Map();
-    for (const d of monthDevis) {
+    for (const d of monthDevisEnvoyes) {
       if (!d.patient_id) continue;
       const cur = byPatient.get(d.patient_id) || { count: 0, total: 0 };
       cur.count++;
@@ -2454,20 +2536,26 @@ Règles :
     const monthsBetween = (firstMonthStart.getFullYear() - firstActivityMonth.getFullYear()) * 12 + (firstMonthStart.getMonth() - firstActivityMonth.getMonth());
     const monthsToShow = Math.max(3, Math.min(12, monthsBetween + 1));
 
+    // ✨ v2.5.6 : chart events-based (Envoyé sur date_envoi, Accepté sur dateAcceptation)
+    const inMonthBy = (dateStr, ms, me) => {
+      if (!dateStr) return false;
+      const t = new Date(dateStr).getTime();
+      return t >= ms.getTime() && t < me.getTime();
+    };
     const months = [];
     for (let i = monthsToShow - 1; i >= 0; i--) {
       const { start: ms, end: me } = getMonthRange(currentOffset - i);
-      const inMonth = allDevis.filter(d => {
-        const t = new Date(d.date_envoi).getTime();
-        return t >= ms.getTime() && t < me.getTime();
-      });
-      const acceptesMois = inMonth.filter(d => d.status === 'Accepté');
+      const envoyesMois = allDevis.filter(d => inMonthBy(d.date_envoi, ms, me));
+      const acceptesMois = allDevis.filter(d => d.status === 'Accepté' && inMonthBy(d.dateAcceptation, ms, me));
+      const refusesMois = allDevis.filter(d => d.status === 'Refusé' && inMonthBy(d.dateRefus, ms, me));
+      const sansReponseMois = allDevis.filter(d => d.status === 'Sans réponse' && inMonthBy(d.dateSansReponse, ms, me));
       months.push({
         label: ms.toLocaleDateString('fr-FR', { month: 'short' }).replace('.', ''),
-        envoye: inMonth.reduce((s, d) => s + (d.montant || 0), 0),
+        envoye: envoyesMois.reduce((s, d) => s + (d.montant || 0), 0),
         accepte: acceptesMois.reduce((s, d) => s + (d.montant || 0), 0),
-        envoyeCount: inMonth.length,
-        accepteCount: acceptesMois.length
+        envoyeCount: envoyesMois.length,
+        accepteCount: acceptesMois.length,
+        decidesCount: acceptesMois.length + refusesMois.length + sansReponseMois.length
       });
     }
     const maxVal = Math.max(1, ...months.map(m => Math.max(m.envoye, m.accepte)));
@@ -2580,14 +2668,14 @@ Règles :
       else { gDotE.setAttribute('opacity', '0'); }
       if (m.accepte > 0) { gDotA.setAttribute('cx', pA.x.toFixed(1)); gDotA.setAttribute('cy', pA.y.toFixed(1)); gDotA.setAttribute('opacity', '1'); }
       else { gDotA.setAttribute('opacity', '0'); }
-      // Taux conversion = sur le nombre de devis (cohérent avec la card du dashboard)
-      const pct = m.envoyeCount > 0 ? Math.round((m.accepteCount / m.envoyeCount) * 100) : 0;
+      // Taux conversion events-based : acceptés du mois / décidés du mois
+      const pct = m.decidesCount > 0 ? Math.round((m.accepteCount / m.decidesCount) * 100) : null;
       const monthCap = m.label.charAt(0).toUpperCase() + m.label.slice(1);
       tip.innerHTML = `
         <div style="font-weight:600;margin-bottom:4px;">${monthCap}</div>
         <div style="display:flex;align-items:center;gap:6px;"><span style="width:8px;height:2px;background:#94999a;display:inline-block;border-radius:1px"></span><span style="color:#9e9ea3">Envoyé</span> <span style="margin-left:auto;font-variant-numeric:tabular-nums">${fmtMoney(m.envoye)} <span style="color:#6e6e72">· ${m.envoyeCount}</span></span></div>
         <div style="display:flex;align-items:center;gap:6px;margin-top:2px;"><span style="width:8px;height:2px;background:#30D158;display:inline-block;border-radius:1px"></span><span style="color:#9e9ea3">Accepté</span> <span style="margin-left:auto;font-variant-numeric:tabular-nums">${fmtMoney(m.accepte)} <span style="color:#6e6e72">· ${m.accepteCount}</span></span></div>
-        ${m.envoyeCount > 0 ? `<div style="margin-top:4px;padding-top:4px;border-top:1px solid #2c2c2e;color:#9e9ea3;">Taux conversion · <span style="color:#fff;font-weight:600">${pct}%</span> <span style="color:#6e6e72">(${m.accepteCount}/${m.envoyeCount})</span></div>` : ''}
+        ${pct !== null ? `<div style="margin-top:4px;padding-top:4px;border-top:1px solid #2c2c2e;color:#9e9ea3;">Taux conversion · <span style="color:#fff;font-weight:600">${pct}%</span> <span style="color:#6e6e72">(${m.accepteCount}/${m.decidesCount} décidés)</span></div>` : ''}
       `;
       const tipRect = tip.getBoundingClientRect();
       const tipW = tipRect.width || 160;
@@ -3348,6 +3436,24 @@ D.U de parodontologie avancé - Université Côte d'Azur`;
   // Legacy unified template (for backward compatibility — uses template 1 if no specific value set)
   const DEFAULT_RELANCE_TEMPLATE = DEFAULT_RELANCE_TEMPLATE_1;
 
+  // v2.5.6 — Template mail d'avis Google (technique "évacuation interne")
+  const DEFAULT_GOOGLE_REVIEW_TEMPLATE = `{{salutation}},
+
+J'espère que votre soin ({{soins}}) s'est bien passé et que tout va bien depuis.
+
+Avant tout, si vous avez la moindre question, gêne, ou si quelque chose ne vous convient pas, n'hésitez pas à me répondre directement à ce mail — je préfère mille fois en discuter avec vous qu'apprendre un souci autrement.
+
+Si tout va bien et que vous avez été satisfait·e de votre prise en charge, un avis Google m'aiderait énormément à faire connaître le cabinet à d'autres patients qui hésitent. C'est court (2 minutes) et précieux :
+
+👉 {{lien_google}}
+
+Merci pour votre confiance et bonne continuation.
+
+Bien cordialement,
+
+---
+{{doctor}}`;
+
   function renderSettings() {
     document.getElementById('setting-relance-days').value = getSetting('relanceDays', '21');
     document.getElementById('setting-abandon-days').value = getSetting('abandonDays', '24');
@@ -3362,6 +3468,11 @@ D.U de parodontologie avancé - Université Côte d'Azur`;
     document.getElementById('setting-maintenance-template').value = getSetting('maintenanceTemplate', DEFAULT_MAINTENANCE_TEMPLATE);
     document.getElementById('setting-morning-digest').checked = getSetting('morningDigestEnabled', '0') === '1';
     document.getElementById('setting-auto-backup').checked = getSetting('autoBackupEnabled', '0') === '1';
+    document.getElementById('setting-google-review-enabled').checked = getSetting('googleReviewEnabled', '0') === '1';
+    document.getElementById('setting-google-review-url').value = getSetting('googleReviewUrl', '');
+    document.getElementById('setting-google-review-delay').value = getSetting('googleReviewDelay', '14');
+    document.getElementById('setting-google-review-template').value = getSetting('googleReviewTemplate', DEFAULT_GOOGLE_REVIEW_TEMPLATE);
+    updateGoogleReviewQueueStatus();
     // Electron-only settings
     if (window.melyiaElectron) {
       document.getElementById('setting-auto-launch-row').style.display = '';
@@ -3403,6 +3514,10 @@ D.U de parodontologie avancé - Université Côte d'Azur`;
     setSetting('morningDigestEnabled', document.getElementById('setting-morning-digest').checked ? '1' : '0');
     setSetting('autoBackupEnabled', document.getElementById('setting-auto-backup').checked ? '1' : '0');
     setSetting('systemNotifEnabled', document.getElementById('setting-system-notif').checked ? '1' : '0');
+    setSetting('googleReviewEnabled', document.getElementById('setting-google-review-enabled').checked ? '1' : '0');
+    setSetting('googleReviewUrl', document.getElementById('setting-google-review-url').value.trim());
+    setSetting('googleReviewDelay', document.getElementById('setting-google-review-delay').value || '14');
+    setSetting('googleReviewTemplate', document.getElementById('setting-google-review-template').value);
     if (window.melyiaElectron) {
       window.melyiaElectron.setAutoLaunch(document.getElementById('setting-auto-launch').checked).catch(() => {});
     }
@@ -3438,7 +3553,8 @@ D.U de parodontologie avancé - Université Côte d'Azur`;
         relanceTemplate: { def: DEFAULT_RELANCE_TEMPLATE_1, el: 'setting-relance-template', label: '1ère relance' },
         relanceTemplate2: { def: DEFAULT_RELANCE_TEMPLATE_2, el: 'setting-relance-template-2', label: '2ème relance' },
         vulgarizePrompt: { def: DEFAULT_VULGARIZE_PROMPT, el: 'setting-vulgarize-prompt', label: 'Vulgariser' },
-        maintenanceTemplate: { def: DEFAULT_MAINTENANCE_TEMPLATE, el: 'setting-maintenance-template', label: 'Maintenance' }
+        maintenanceTemplate: { def: DEFAULT_MAINTENANCE_TEMPLATE, el: 'setting-maintenance-template', label: 'Maintenance' },
+        googleReviewTemplate: { def: DEFAULT_GOOGLE_REVIEW_TEMPLATE, el: 'setting-google-review-template', label: 'Avis Google' }
       };
       const entry = map[key];
       if (!entry) return;
@@ -4394,6 +4510,121 @@ D.U de parodontologie avancé - Université Côte d'Azur`;
   }
 
   // ========================================
+  // GOOGLE REVIEW AUTO-MAIL (v2.5.6)
+  // ========================================
+  async function getGoogleReviewCandidates() {
+    const delay = Math.max(1, parseInt(getSetting('googleReviewDelay', '14'), 10) || 14);
+    const now = Date.now();
+    const cutoff = now - delay * 24 * 60 * 60 * 1000;
+    await refreshPatientsCache();
+    const all = await db.devis.toArray();
+    return all.filter(d => {
+      if (!d.soinTermine || !d.dateSoinTermine) return false;
+      if (d.googleReviewMailSent) return false;
+      if (new Date(d.dateSoinTermine).getTime() > cutoff) return false;
+      const p = d.patient_id ? getCachedPatient(d.patient_id) : null;
+      if (!p || !p.email) return false;
+      if (p.noContact === true) return false;
+      return true;
+    });
+  }
+
+  async function updateGoogleReviewQueueStatus() {
+    const el = document.getElementById('google-review-queue-status');
+    if (!el) return;
+    try {
+      const enabled = getSetting('googleReviewEnabled', '0') === '1';
+      const url = getSetting('googleReviewUrl', '').trim();
+      if (!enabled) { el.textContent = 'Module désactivé'; return; }
+      if (!url) { el.textContent = '⚠ Renseigne ton lien Google avis'; return; }
+      const candidates = await getGoogleReviewCandidates();
+      el.textContent = candidates.length === 0
+        ? 'Aucun mail à envoyer pour le moment'
+        : `${candidates.length} mail${candidates.length > 1 ? 's' : ''} prêt${candidates.length > 1 ? 's' : ''} à partir au prochain check`;
+    } catch (e) {
+      el.textContent = 'Erreur : ' + e.message;
+    }
+  }
+
+  async function checkGoogleReviewQueue(opts = {}) {
+    const force = !!opts.force;
+    if (!force && getSetting('googleReviewEnabled', '0') !== '1') return { skipped: 'module OFF' };
+    if (!GoogleAuth.isConnected()) {
+      if (force) toast('Connecte-toi à Google d\'abord', 'warning');
+      return { skipped: 'not connected' };
+    }
+    const reviewUrl = getSetting('googleReviewUrl', '').trim();
+    if (!reviewUrl) {
+      if (force) toast('Renseigne ton lien Google avis', 'warning');
+      return { skipped: 'no review URL' };
+    }
+    const today = new Date().toISOString().slice(0, 10);
+    if (!force && getSetting('lastGoogleReviewCheckDate', '') === today) return { skipped: 'already checked today' };
+
+    const candidates = await getGoogleReviewCandidates();
+    if (candidates.length === 0) {
+      setSetting('lastGoogleReviewCheckDate', today);
+      if (force) toast('Aucun mail d\'avis à envoyer', 'info');
+      return { sent: 0 };
+    }
+
+    const template = getSetting('googleReviewTemplate', DEFAULT_GOOGLE_REVIEW_TEMPLATE);
+    const doctorName = getSetting('doctorName', '');
+    const userEmail = getSetting('googleUserEmail', '');
+    const fromHeader = doctorName && userEmail ? `${doctorName} <${userEmail}>` : '';
+
+    let sentCount = 0;
+    const errors = [];
+    for (const d of candidates) {
+      try {
+        const p = getCachedPatient(d.patient_id);
+        const filled = template
+          .replace(/\{\{salutation\}\}/g, buildSalutation(p))
+          .replace(/\{\{civilite\}\}/g, titreOf(p))
+          .replace(/\{\{prenom\}\}/g, p.prenom || '')
+          .replace(/\{\{nom\}\}/g, p.nom || '')
+          .replace(/\{\{soins\}\}/g, d.soins || 'votre traitement')
+          .replace(/\{\{lien_google\}\}/g, reviewUrl)
+          .replace(/\{\{doctor\}\}/g, doctorName || 'Dr Kebieche');
+        const subject = `Suite à votre soin — un petit retour ?`;
+        await Gmail.sendEmail({ to: p.email, subject, body: filled, from: fromHeader });
+        await db.devis.update(d.id, {
+          googleReviewMailSent: true,
+          googleReviewMailSentAt: new Date().toISOString()
+        });
+        sentCount++;
+      } catch (e) {
+        errors.push({ devisId: d.id, error: e.message });
+        console.error('[Melyia] Google review mail failed for devis', d.id, e);
+      }
+    }
+    setSetting('lastGoogleReviewCheckDate', today);
+    if (sentCount > 0) {
+      toast(`${sentCount} mail${sentCount > 1 ? 's' : ''} d'avis Google envoyé${sentCount > 1 ? 's' : ''} ✓`, 'success');
+      scheduleAutoBackup();
+    }
+    if (errors.length > 0 && force) {
+      toast(`${errors.length} erreur${errors.length > 1 ? 's' : ''} d'envoi`, 'warning');
+    }
+    return { sent: sentCount, errors };
+  }
+
+  (function wireGoogleReviewTestBtn() {
+    const btn = document.getElementById('test-google-review-btn');
+    if (!btn) return;
+    btn.addEventListener('click', async () => {
+      btn.disabled = true;
+      const orig = btn.textContent;
+      btn.textContent = 'Envoi…';
+      try { await checkGoogleReviewQueue({ force: true }); }
+      catch (e) { toast('Erreur : ' + e.message, 'error'); }
+      btn.disabled = false;
+      btn.textContent = orig;
+      updateGoogleReviewQueueStatus();
+    });
+  })();
+
+  // ========================================
   // DRIVE RESTORE MODAL
   // ========================================
   document.getElementById('drive-restore-btn').addEventListener('click', async () => {
@@ -4821,6 +5052,7 @@ D.U de parodontologie avancé - Université Côte d'Azur`;
     setTimeout(checkMorningDigest, 2000);
     setTimeout(checkDrivePull, 3000);
     setTimeout(suggestStaleDevisCleanup, 5000);
+    setTimeout(checkGoogleReviewQueue, 4000);
     offerTemplatesMigrationV241();
   }
 
