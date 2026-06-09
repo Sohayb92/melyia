@@ -727,7 +727,7 @@
             <div class="text-[15px] font-medium">Template mail d'avis</div>
             <button type="button" data-reset-template="googleReviewTemplate" class="text-[12px] text-accent hover:underline">Réinitialiser</button>
           </div>
-          <div class="text-[13px] text-ink-500 mb-2">Ton chaleureux, ouvre la porte au feedback direct avant le CTA Google. Variables : <code>{{salutation}}</code> · <code>{{prenom}}</code> · <code>{{nom}}</code> · <code>{{soins}}</code> · <code>{{lien_google}}</code> · <code>{{doctor}}</code> + séparateur signature <code>---</code>.</div>
+          <div class="text-[13px] text-ink-500 mb-2">Ton chaleureux, ouvre la porte au feedback direct avant le CTA Google. Marche aussi bien pour un patient suite à un soin que pour un patient sans devis. Variables : <code>{{salutation}}</code> · <code>{{prenom}}</code> · <code>{{nom}}</code> · <code>{{lien_google}}</code> · <code>{{doctor}}</code> + séparateur signature <code>---</code>.</div>
           <textarea id="setting-google-review-template" rows="10" class="input !text-[13px]"></textarea>
         </div>
         <div class="grouped-row">
@@ -3607,7 +3607,7 @@ D.U de parodontologie avancé - Université Côte d'Azur`;
   // v2.5.6 — Template mail d'avis Google (technique "évacuation interne")
   const DEFAULT_GOOGLE_REVIEW_TEMPLATE = `{{salutation}},
 
-J'espère que votre soin ({{soins}}) s'est bien passé et que tout va bien depuis.
+J'espère que tout s'est bien passé et que vous allez bien depuis votre passage au cabinet.
 
 Avant tout, si vous avez la moindre question, gêne, ou si quelque chose ne vous convient pas, n'hésitez pas à me répondre directement à ce mail — je préfère mille fois en discuter avec vous qu'apprendre un souci autrement.
 
@@ -3621,6 +3621,20 @@ Bien cordialement,
 
 ---
 {{doctor}}`;
+
+  // v2.5.12 — Migration template avis : retire la phrase "votre soin ({{soins}})" maladroite
+  // pour les patients sans devis. Ne touche QUE si l'ancienne phrase exacte est présente
+  // (template par défaut non personnalisé, ou personnalisé mais avec cette phrase d'origine).
+  (function migrateGoogleReviewTemplateV2512() {
+    const saved = localStorage.getItem('melyia_googleReviewTemplate');
+    if (!saved) return; // pas de template sauvé → le nouveau défaut s'applique direct
+    const oldPhrase = "J'espère que votre soin ({{soins}}) s'est bien passé et que tout va bien depuis.";
+    const newPhrase = "J'espère que tout s'est bien passé et que vous allez bien depuis votre passage au cabinet.";
+    if (saved.includes(oldPhrase)) {
+      localStorage.setItem('melyia_googleReviewTemplate', saved.replace(oldPhrase, newPhrase));
+      console.log('[Melyia] Template avis migré v2.5.12 (parenthèse soin retirée)');
+    }
+  })();
 
   function renderSettings() {
     document.getElementById('setting-relance-days').value = getSetting('relanceDays', '21');
@@ -4755,7 +4769,7 @@ Bien cordialement,
       .replace(/\{\{soins\}\}/g, soinsLabel)
       .replace(/\{\{lien_google\}\}/g, reviewUrl)
       .replace(/\{\{doctor\}\}/g, doctorName || 'Dr Kebieche');
-    const subject = `Suite à votre soin — un petit retour ?`;
+    const subject = `Votre passage au cabinet — un petit retour ?`;
     await Gmail.sendEmail({ to: patient.email, subject, body: filled, from: fromHeader });
 
     // Track au niveau patient (pas devis — il peut y en avoir 0 ou plusieurs)
@@ -4803,7 +4817,7 @@ Bien cordialement,
           .replace(/\{\{soins\}\}/g, d.soins || 'votre traitement')
           .replace(/\{\{lien_google\}\}/g, reviewUrl)
           .replace(/\{\{doctor\}\}/g, doctorName || 'Dr Kebieche');
-        const subject = `Suite à votre soin — un petit retour ?`;
+        const subject = `Votre passage au cabinet — un petit retour ?`;
         await Gmail.sendEmail({ to: p.email, subject, body: filled, from: fromHeader });
         await db.devis.update(d.id, {
           googleReviewMailSent: true,
