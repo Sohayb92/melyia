@@ -1208,6 +1208,14 @@
       await devisTable.update(d.id, update);
     }
   });
+  db.version(5).stores({
+    patients: '++id, nom, prenom, email, telephone, created_at',
+    devis: '++id, patient_id, status, date_envoi, dateAcceptation, dateRefus, dateSansReponse, soinTermine, dateSoinTermine, googleReviewMailSent, date_relance_prevue, montant',
+    relances: '++id, devis_id, date',
+    maintenances: '++id, patient_id, type, intervalle_mois, prochain_rappel, actif',
+    rappels_maintenance: '++id, maintenance_id, date'
+  });
+  // v5 — Ajout patient.googleReviewSentManuallyAt (non indexé, set quand on envoie un mail d'avis manuel)
 
   // ========================================
   // SETTINGS
@@ -1976,6 +1984,7 @@ Règles :
         }
         closeDetail();
         renderDashboard();
+        if (document.getElementById('view-stats') && document.getElementById('view-stats').classList.contains('active')) renderStats();
         scheduleAutoBackup();
       });
     });
@@ -3179,6 +3188,18 @@ Règles :
     const acceptedAmount = accepted.reduce((s, d) => s + (d.montant || 0), 0);
     const initials = ((patient.prenom || '?')[0] + (patient.nom || '?')[0]).toUpperCase();
 
+    // v2.5.11 — État avis Google
+    const googleReviewEnabled = getSetting('googleReviewEnabled', '0') === '1';
+    const googleReviewUrl = getSetting('googleReviewUrl', '').trim();
+    const canSendReview = googleReviewEnabled && !!googleReviewUrl && !!patient.email && patient.noContact !== true;
+    let reviewSent = null;
+    if (patient.googleReviewSentManuallyAt) {
+      reviewSent = { at: patient.googleReviewSentManuallyAt, source: 'manuel' };
+    } else {
+      const devisWithReview = devisList.find(d => d.googleReviewMailSent && d.googleReviewMailSentAt);
+      if (devisWithReview) reviewSent = { at: devisWithReview.googleReviewMailSentAt, source: 'auto' };
+    }
+
     const html = `
       <div class="flex items-center justify-between mb-4">
         <button id="close-patient-detail" class="text-[16px] text-ink-500 font-normal">Fermer</button>
@@ -3214,6 +3235,28 @@ Règles :
           <div class="grouped-row block">
             <div class="text-[14px] text-ink-700 whitespace-pre-wrap">${esc(patient.notes)}</div>
           </div>
+        </div>
+      ` : ''}
+
+      ${canSendReview ? `
+        <div class="text-[12px] uppercase tracking-wider text-ink-500 font-semibold ml-1 mb-1.5">Avis Google</div>
+        <div class="grouped-list mb-5">
+          ${reviewSent ? `
+            <div class="grouped-row block">
+              <div class="flex items-center gap-2">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#30D158" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+                <div class="text-[14px] text-ink-700"><span class="font-medium">Mail d'avis envoyé</span> le ${formatDate(reviewSent.at)} <span class="text-ink-400">(${reviewSent.source})</span></div>
+              </div>
+            </div>
+          ` : `
+            <div class="grouped-row block">
+              <button id="send-google-review-manual" class="btn btn-secondary w-full !text-[14px]">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+                Envoyer mail d'avis Google maintenant
+              </button>
+              <div class="text-[12px] text-ink-500 mt-2 px-1">Pour les anciens patients ou patients sans devis. 1 mail max par patient.</div>
+            </div>
+          `}
         </div>
       ` : ''}
 
@@ -3288,6 +3331,31 @@ Règles :
       closeDetail();
       openPatientModal(patient);
     });
+
+    // v2.5.11 — Handler "Envoyer mail d'avis Google manuel"
+    const sendReviewBtn = document.getElementById('send-google-review-manual');
+    if (sendReviewBtn) {
+      sendReviewBtn.addEventListener('click', () => {
+        toastConfirm(`Envoyer le mail d'avis Google à ${patientFullName(patient)} maintenant ?`, {
+          confirmLabel: 'Envoyer',
+          cancelLabel: 'Annuler',
+          onConfirm: async () => {
+            sendReviewBtn.disabled = true;
+            sendReviewBtn.innerHTML = 'Envoi…';
+            try {
+              await sendGoogleReviewToPatientManual(patient, devisList);
+              toast(`Mail d'avis envoyé à ${patient.email} ✓`, 'success');
+              scheduleAutoBackup();
+              openPatientDetail(patient.id);
+            } catch (e) {
+              toast('Erreur : ' + e.message, 'error');
+              sendReviewBtn.disabled = false;
+              sendReviewBtn.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg> Envoyer mail d'avis Google maintenant`;
+            }
+          }
+        });
+      });
+    }
     document.getElementById('add-devis-for-patient').addEventListener('click', () => {
       closeDetail();
       openModal(null, patient);
@@ -4287,6 +4355,7 @@ Bien cordialement,
         toast('Rappel envoyé · prochain dans ' + maintenance.intervalle_mois + ' mois', 'success');
         closeDetail();
         renderDashboard();
+        if (document.getElementById('view-stats') && document.getElementById('view-stats').classList.contains('active')) renderStats();
         scheduleAutoBackup();
       } catch (e) {
         toast('Erreur envoi : ' + e.message, 'error');
@@ -4470,6 +4539,7 @@ Bien cordialement,
         toast('Mail envoyé via Gmail ✓', 'success');
         closeDetail();
         renderDashboard();
+        if (document.getElementById('view-stats') && document.getElementById('view-stats').classList.contains('active')) renderStats();
         scheduleAutoBackup();
       } catch (e) {
         toast('Erreur envoi : ' + e.message, 'error');
@@ -4627,8 +4697,46 @@ Bien cordialement,
       const p = d.patient_id ? getCachedPatient(d.patient_id) : null;
       if (!p || !p.email) return false;
       if (p.noContact === true) return false;
+      if (p.googleReviewSentManuallyAt) return false; // v2.5.11 — pas de double envoi manuel/auto
       return true;
     });
+  }
+
+  // v2.5.11 — Envoi manuel ciblé sur un patient (anciens patients ou sans devis)
+  async function sendGoogleReviewToPatientManual(patient, devisList) {
+    if (!GoogleAuth.isConnected()) throw new Error('Connecte-toi à Google d\'abord (Réglages)');
+    const reviewUrl = getSetting('googleReviewUrl', '').trim();
+    if (!reviewUrl) throw new Error('Renseigne ton lien Google avis dans Réglages');
+    if (!patient.email) throw new Error('Pas d\'email pour ce patient');
+    if (patient.noContact === true) throw new Error('Patient en STOP (noContact)');
+    if (patient.googleReviewSentManuallyAt) throw new Error('Mail d\'avis déjà envoyé manuellement à ce patient');
+
+    const template = getSetting('googleReviewTemplate', DEFAULT_GOOGLE_REVIEW_TEMPLATE);
+    const doctorName = getSetting('doctorName', '');
+    const userEmail = getSetting('googleUserEmail', '');
+    const fromHeader = doctorName && userEmail ? `${doctorName} <${userEmail}>` : '';
+
+    let soinsLabel = 'votre récent traitement';
+    if (devisList && devisList.length > 0) {
+      const dernierSoinTermine = devisList
+        .filter(d => d.soinTermine && d.soins)
+        .sort((a, b) => new Date(b.dateSoinTermine || 0) - new Date(a.dateSoinTermine || 0))[0];
+      if (dernierSoinTermine) soinsLabel = dernierSoinTermine.soins;
+    }
+
+    const filled = template
+      .replace(/\{\{salutation\}\}/g, buildSalutation(patient))
+      .replace(/\{\{civilite\}\}/g, titreOf(patient))
+      .replace(/\{\{prenom\}\}/g, patient.prenom || '')
+      .replace(/\{\{nom\}\}/g, patient.nom || '')
+      .replace(/\{\{soins\}\}/g, soinsLabel)
+      .replace(/\{\{lien_google\}\}/g, reviewUrl)
+      .replace(/\{\{doctor\}\}/g, doctorName || 'Dr Kebieche');
+    const subject = `Suite à votre soin — un petit retour ?`;
+    await Gmail.sendEmail({ to: patient.email, subject, body: filled, from: fromHeader });
+
+    await db.patients.update(patient.id, { googleReviewSentManuallyAt: new Date().toISOString() });
+    await refreshPatientsCache();
   }
 
   async function updateGoogleReviewQueueStatus() {
