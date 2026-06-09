@@ -20,3 +20,5 @@ configurer-cle.html
 
 # Personal context docs (notes, journal) — keep local; remove this line if you want them public
 contexte/
+screenshots/
+node_modules/
