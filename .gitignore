@@ -22,3 +22,6 @@ configurer-cle.html
 contexte/
 screenshots/
 node_modules/
+
+# Audit interne (rapport, constats sécurité, captures) — même statut que contexte/ : local only
+audit/
