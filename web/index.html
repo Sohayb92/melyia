@@ -1268,6 +1268,32 @@
     return { ok: true };
   }
 
+  // QW-1 (audit) : restauration ATOMIQUE — clear() + bulkAdd() dans une transaction
+  // unique → rollback Dexie si échec, la base reste inchangée. Settings après succès.
+  async function restoreFromBackup(data) {
+    const tables = [db.devis, db.patients, db.relances];
+    if (db.maintenances) tables.push(db.maintenances);
+    if (db.rappels_maintenance) tables.push(db.rappels_maintenance);
+    await db.transaction('rw', tables, async () => {
+      await db.devis.clear();
+      await db.patients.clear();
+      await db.relances.clear();
+      if (db.maintenances) await db.maintenances.clear();
+      if (db.rappels_maintenance) await db.rappels_maintenance.clear();
+      if (data.patients) await db.patients.bulkAdd(data.patients);
+      if (data.devis) await db.devis.bulkAdd(data.devis);
+      if (data.relances) await db.relances.bulkAdd(data.relances);
+      if (data.maintenances && db.maintenances) await db.maintenances.bulkAdd(data.maintenances);
+      if (data.rappels_maintenance && db.rappels_maintenance) await db.rappels_maintenance.bulkAdd(data.rappels_maintenance);
+    });
+    if (data.settings) {
+      // Jamais de restauration de secrets depuis un backup
+      for (const [k, v] of Object.entries(data.settings)) {
+        if (isSettingExportable(k)) localStorage.setItem(k, v);
+      }
+    }
+  }
+
   // ========================================
   // PATIENTS HELPERS
   // ========================================
@@ -2297,7 +2323,12 @@ Règles :
           const id = parseInt(b.dataset.id, 10);
           const action = b.dataset.action;
           const statusMap = { accepted: 'Accepté', refused: 'Refusé', noresponse: 'Sans réponse' };
-          await db.devis.update(id, { status: statusMap[action] });
+          // QW-2 (audit) : poser la date d'événement comme la modale détail
+          const update = { status: statusMap[action] };
+          if (action === 'accepted') update.dateAcceptation = new Date().toISOString();
+          else if (action === 'refused') update.dateRefus = new Date().toISOString();
+          else if (action === 'noresponse') update.dateSansReponse = new Date().toISOString();
+          await db.devis.update(id, update);
           toast(statusMap[action], 'success');
           renderDashboard();
           if (typeof scheduleAutoBackup === 'function') scheduleAutoBackup();
@@ -3850,22 +3881,7 @@ Bien cordialement,
         toast('Fichier invalide : ' + check.reason, 'error');
         return;
       }
-      await db.devis.clear();
-      await db.patients.clear();
-      await db.relances.clear();
-      if (db.maintenances) await db.maintenances.clear();
-      if (db.rappels_maintenance) await db.rappels_maintenance.clear();
-      if (data.patients) await db.patients.bulkAdd(data.patients);
-      if (data.devis) await db.devis.bulkAdd(data.devis);
-      if (data.relances) await db.relances.bulkAdd(data.relances);
-      if (data.maintenances && db.maintenances) await db.maintenances.bulkAdd(data.maintenances);
-      if (data.rappels_maintenance && db.rappels_maintenance) await db.rappels_maintenance.bulkAdd(data.rappels_maintenance);
-      if (data.settings) {
-        // Filtre : ne JAMAIS restaurer un secret depuis un backup (anti-rollback de credentials compromis)
-        for (const [k, v] of Object.entries(data.settings)) {
-          if (isSettingExportable(k)) localStorage.setItem(k, v);
-        }
-      }
+      await restoreFromBackup(data); // QW-1 : atomique, rollback si échec
       await refreshPatientsCache();
       toast('Import terminé', 'success');
       navigate('dashboard');
@@ -4901,22 +4917,8 @@ Bien cordialement,
               toast('Backup invalide : ' + check.reason, 'error');
               return;
             }
-            // Bug #20 fix : nettoyer aussi maintenances + rappels_maintenance
-            await db.devis.clear();
-            await db.patients.clear();
-            await db.relances.clear();
-            if (db.maintenances) await db.maintenances.clear();
-            if (db.rappels_maintenance) await db.rappels_maintenance.clear();
-            if (data.devis) await db.devis.bulkAdd(data.devis);
-            if (data.patients) await db.patients.bulkAdd(data.patients);
-            if (data.relances) await db.relances.bulkAdd(data.relances);
-            if (data.maintenances && db.maintenances) await db.maintenances.bulkAdd(data.maintenances);
-            if (data.rappels_maintenance && db.rappels_maintenance) await db.rappels_maintenance.bulkAdd(data.rappels_maintenance);
-            if (data.settings) {
-              for (const [k, v] of Object.entries(data.settings)) {
-                if (isSettingExportable(k)) localStorage.setItem(k, v);
-              }
-            }
+            // Bug #20 fix (toutes les tables) + QW-1 audit : restauration atomique
+            await restoreFromBackup(data);
             await refreshPatientsCache();
             toast('Backup restauré ✓', 'success');
             closeDetail();
@@ -5106,21 +5108,7 @@ Bien cordialement,
               toast('Backup Drive invalide : ' + check.reason, 'error');
               return;
             }
-            await db.devis.clear();
-            await db.patients.clear();
-            await db.relances.clear();
-            if (db.maintenances) await db.maintenances.clear();
-            if (db.rappels_maintenance) await db.rappels_maintenance.clear();
-            if (data.patients) await db.patients.bulkAdd(data.patients);
-            if (data.devis) await db.devis.bulkAdd(data.devis);
-            if (data.relances) await db.relances.bulkAdd(data.relances);
-            if (data.maintenances && db.maintenances) await db.maintenances.bulkAdd(data.maintenances);
-            if (data.rappels_maintenance && db.rappels_maintenance) await db.rappels_maintenance.bulkAdd(data.rappels_maintenance);
-            if (data.settings) {
-              for (const [k, v] of Object.entries(data.settings)) {
-                if (isSettingExportable(k)) localStorage.setItem(k, v);
-              }
-            }
+            await restoreFromBackup(data); // QW-1 : atomique, rollback si échec
             setSetting('lastLocalModification', String(driveTime));
             await refreshPatientsCache();
             toast('Données synchronisées depuis Drive ✓', 'success');
