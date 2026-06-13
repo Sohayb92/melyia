@@ -1478,8 +1478,11 @@
   }
 
   // URL « Je souhaite prendre rendez-vous » → page /rappel (le cabinet rappelle).
-  function buildRappelUrl(jeton, utm) {
-    return SITE_URL + '/rappel?r=' + encodeURIComponent(jeton || '') + (utm ? '&' + utm : '');
+  function buildRappelUrl(jeton, utm, nom) {
+    let q = 'r=' + encodeURIComponent(jeton || '');
+    if (nom) q += '&p=' + encodeURIComponent(nom);
+    if (utm) q += '&' + utm;
+    return SITE_URL + '/rappel?' + q;
   }
 
   // Signature plein texte (bloc Logos : collé en clair dans Logos, pas d'écrin HTML).
@@ -1490,11 +1493,11 @@ Chirurgien-dentiste — Cabinet Dentaire La Cabane
 01 42 42 94 69 · drkebieche.fr`;
 
   // Pied du bloc Logos : 2 liens (comprendre + rappel si jeton) + signature corrigée.
-  function buildLogosFooter(devis) {
+  function buildLogosFooter(devis, patientName) {
     const comprendre = buildComprendreUrl(devis ? devis.soinsKeys : [], UTM_DEVIS);
     let f = "\n\nPour comprendre vos soins simplement, j'ai préparé une page qui explique chacun des traitements de votre devis :\n" + comprendre + "\n\n";
     if (devis && devis.jeton) {
-      f += "Pour prendre rendez-vous, le plus simple est que mon équipe vous rappelle :\n" + buildRappelUrl(devis.jeton, UTM_DEVIS) + "\nou appelez-nous directement au 01 42 42 94 69.\n\n";
+      f += "Pour prendre rendez-vous, le plus simple est que mon équipe vous rappelle :\n" + buildRappelUrl(devis.jeton, UTM_DEVIS, patientName) + "\nou appelez-nous directement au 01 42 42 94 69.\n\n";
     } else {
       f += "Pour prendre rendez-vous ou pour toute question, appelez-nous au 01 42 42 94 69.\n\n";
     }
@@ -3662,9 +3665,9 @@ Glossaire de vulgarisation :
 - Avulsion : Extraction de la dent.
 - Comblement osseux : Étape chirurgicale permettant de préserver le volume de l'os de la mâchoire (qui a tendance à se résorber après la perte d'une dent).
 - Implant : Remplacement de la racine de la dent. Nécessite toujours une période de cicatrisation (généralement 3 à 4 mois) avant la pose de la couronne.
-- Onlay / Overlay : Pièce en céramique fabriquée sur mesure qui vient s'imbriquer dans/sur la dent pour reconstruire le volume perdu de manière solide, esthétique et pérenne (suite à une carie ou un vieil amalgame infiltré).
+- Onlay / Overlay : Pièce en céramique fabriquée sur mesure qui s'imbrique dans/sur la dent pour reconstruire le volume perdu de manière solide, esthétique et pérenne (suite à une carie ou un vieil amalgame infiltré). Distingue bien les deux dans ton explication : l'onlay recouvre une ou plusieurs cuspides (une partie de la surface de mastication), tandis que l'overlay recouvre la totalité de la surface de mastication de la dent.
 - RTE (Reprise de Traitement Endodontique) / Endo : Reprise du traitement canalaire pour désinfecter minutieusement le réseau de racines.
-- LIPOE volumineux : Lésion Inflammatoire Péri-Radiculaire d'Origine Endodontique (infection osseuse au bout de la racine). Nécessite un nettoyage (RTE), la pose d'une couronne provisoire et une mise en observation stricte de 6 mois pour valider la cicatrisation osseuse à la radio avant la couronne définitive.
+- LIPOE volumineux : Lésion Inflammatoire Péri-Radiculaire d'Origine Endodontique (infection osseuse au bout de la racine). Nécessite un nettoyage (RTE) puis la pose d'une couronne. N'ajoute PAS d'office de période d'observation : si une mise en observation de plusieurs mois est nécessaire avant la couronne définitive, je le préciserai explicitement dans les mots-clés.
 
 EXEMPLE DE RÉFÉRENCE POUR LE STYLE
 
@@ -3769,7 +3772,8 @@ Bien cordialement,`;
       melyia_relanceTemplate: DEFAULT_RELANCE_TEMPLATE_1,
       melyia_relanceTemplate2: DEFAULT_RELANCE_TEMPLATE_2,
       melyia_maintenanceTemplate: DEFAULT_MAINTENANCE_TEMPLATE,
-      melyia_googleReviewTemplate: DEFAULT_GOOGLE_REVIEW_TEMPLATE
+      melyia_googleReviewTemplate: DEFAULT_GOOGLE_REVIEW_TEMPLATE,
+      melyia_vulgarizePrompt: DEFAULT_VULGARIZE_PROMPT
     };
     let n = 0;
     Object.keys(map).forEach(function(k){
@@ -4599,7 +4603,12 @@ Bien cordialement,`;
       const doctor = (getSetting('doctorName', '') || '').trim() || 'Votre dentiste';
       const prompt = promptTemplate.split('{{soins}}').join(keywords).split('{{doctor}}').join(doctor);
       const result = await geminiGenerateText(prompt, { temperature: 0.7, maxOutputTokens: 4096 });
-      document.getElementById('vulgarize-output').value = result.replace(/\s+$/, '') + buildLogosFooter(currentVulgarizeDevis);
+      let patientName = '';
+      if (currentVulgarizeDevis && currentVulgarizeDevis.patient_id) {
+        try { const pt = await db.patients.get(currentVulgarizeDevis.patient_id); if (pt) patientName = patientFullName(pt); } catch (e) {}
+      }
+      const corps = result.replace(/\n+\s*Bien cordialement[\s\S]*$/i, '').replace(/\s+$/, '');
+      document.getElementById('vulgarize-output').value = corps + buildLogosFooter(currentVulgarizeDevis, patientName);
       document.getElementById('vulgarize-result-block').classList.remove('hidden');
       status.textContent = '✓ Généré';
       status.className = 'text-[12px] text-success';
@@ -4679,7 +4688,7 @@ Bien cordialement,`;
       .replaceAll('{{soins}}', devis.soins || '')
       .replaceAll('{{date_envoi}}', formatDate(devis.date_envoi))
       .replaceAll('{{lien_comprendre}}', buildComprendreUrl(devis.soinsKeys, relUtm))
-      .replaceAll('{{lien_rappel}}', buildRappelUrl(devis.jeton, relUtm))
+      .replaceAll('{{lien_rappel}}', buildRappelUrl(devis.jeton, relUtm, patientFullName(pInfo)))
       .replaceAll('{{doctor}}', doctorName);
     const subjectDefault = `Suite à votre devis du ${formatDate(devis.date_envoi)}`;
     const userEmail = getSetting('googleUserEmail', '');
