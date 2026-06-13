@@ -119,6 +119,14 @@
     .input:focus { outline: none; background: #fff; border-color: #0A84FF; box-shadow: 0 0 0 3px rgba(10,132,255,0.15); }
     textarea.input { height: auto; padding: 12px 14px; resize: vertical; min-height: 80px; }
 
+    /* Tags soins — chips de sélection des clés (liens patient v2.6) */
+    .soinkey { display: inline-flex; }
+    .soinkey input { position: absolute; opacity: 0; width: 0; height: 0; }
+    .soinkey span { display: inline-block; padding: 5px 11px; border-radius: 9999px; border: 1px solid #E5E5EA; background: #fff; font-size: 13px; color: #3C3C43; cursor: pointer; user-select: none; transition: all 120ms; }
+    .soinkey span:hover { border-color: #C7C7CC; }
+    .soinkey input:checked + span { background: rgba(10,132,255,0.10); border-color: #0A84FF; color: #0060CC; font-weight: 500; }
+    .soinkey input:focus-visible + span { box-shadow: 0 0 0 3px rgba(10,132,255,0.15); }
+
     /* Top nav */
     .nav-link { padding: 8px 14px; border-radius: 10px; font-weight: 500; font-size: 15px; color: #3C3C43; display: inline-flex; align-items: center; gap: 7px; transition: all 150ms; cursor: pointer; user-select: none; }
     .nav-link:hover { background: #F2F2F7; color: #0A0A0B; }
@@ -915,6 +923,52 @@
             <label class="text-[13px] font-medium text-ink-700 block mb-1.5 ml-1">Type de soins</label>
             <input id="form-soins" type="text" required placeholder="ex: couronne CCM 17, overlay 16, implant 26" class="input"/>
           </div>
+
+          <details class="pt-2">
+            <summary class="text-[14px] font-medium text-accent cursor-pointer ml-1 select-none">+ Tags soins <span class="text-ink-400 font-normal">(liens patient)</span></summary>
+            <p class="text-[11px] text-ink-400 mt-2 mb-2 ml-1 leading-snug">Cochez les soins du devis : ils génèrent le lien « Comprendre mon devis » et personnalisent les mails.</p>
+            <div id="form-soins-keys-wrap" class="space-y-2.5">
+              <div>
+                <div class="text-[11px] font-semibold uppercase tracking-wide text-ink-400 mb-1 ml-1">Implantologie &amp; chirurgie</div>
+                <div class="flex flex-wrap gap-1.5">
+                  <label class="soinkey"><input type="checkbox" value="implant"><span>Implant</span></label>
+                  <label class="soinkey"><input type="checkbox" value="comblement"><span>Comblement osseux</span></label>
+                  <label class="soinkey"><input type="checkbox" value="greffe-osseuse"><span>Greffe osseuse</span></label>
+                  <label class="soinkey"><input type="checkbox" value="chirurgie-orale"><span>Chirurgie orale</span></label>
+                  <label class="soinkey"><input type="checkbox" value="dds"><span>Dents de sagesse</span></label>
+                </div>
+              </div>
+              <div>
+                <div class="text-[11px] font-semibold uppercase tracking-wide text-ink-400 mb-1 ml-1">Parodontologie</div>
+                <div class="flex flex-wrap gap-1.5">
+                  <label class="soinkey"><input type="checkbox" value="paro"><span>Parodontite</span></label>
+                  <label class="soinkey"><input type="checkbox" value="greffe-gencive"><span>Greffe de gencive</span></label>
+                  <label class="soinkey"><input type="checkbox" value="maintenance-paro"><span>Maintenance paro</span></label>
+                </div>
+              </div>
+              <div>
+                <div class="text-[11px] font-semibold uppercase tracking-wide text-ink-400 mb-1 ml-1">Dentisterie adhésive &amp; prothèses</div>
+                <div class="flex flex-wrap gap-1.5">
+                  <label class="soinkey"><input type="checkbox" value="overlay"><span>Overlay / Inlay</span></label>
+                  <label class="soinkey"><input type="checkbox" value="composite"><span>Composite</span></label>
+                  <label class="soinkey"><input type="checkbox" value="couronne"><span>Couronne</span></label>
+                  <label class="soinkey"><input type="checkbox" value="bridge"><span>Bridge</span></label>
+                  <label class="soinkey"><input type="checkbox" value="couronne-implant"><span>Couronne sur implant</span></label>
+                  <label class="soinkey"><input type="checkbox" value="amovible"><span>Prothèse amovible</span></label>
+                </div>
+              </div>
+              <div>
+                <div class="text-[11px] font-semibold uppercase tracking-wide text-ink-400 mb-1 ml-1">Soins du quotidien</div>
+                <div class="flex flex-wrap gap-1.5">
+                  <label class="soinkey"><input type="checkbox" value="carie"><span>Carie</span></label>
+                  <label class="soinkey"><input type="checkbox" value="te"><span>Dévitalisation</span></label>
+                  <label class="soinkey"><input type="checkbox" value="rte"><span>Retraitement</span></label>
+                  <label class="soinkey"><input type="checkbox" value="detartrage"><span>Détartrage</span></label>
+                  <label class="soinkey"><input type="checkbox" value="blanchiment"><span>Blanchiment</span></label>
+                </div>
+              </div>
+            </div>
+          </details>
 
           <details class="pt-2">
             <summary class="text-[14px] font-medium text-accent cursor-pointer ml-1 select-none">+ Notes (optionnel)</summary>
@@ -1790,6 +1844,15 @@ Règles :
     });
   }
 
+  // Sélecteur de tags soins (clés du site) — lecture/écriture des cases cochées.
+  function getCheckedSoinsKeys() {
+    return Array.from(document.querySelectorAll('#form-soins-keys-wrap input:checked')).map(c => c.value);
+  }
+  function setCheckedSoinsKeys(keys) {
+    const set = new Set(keys || []);
+    document.querySelectorAll('#form-soins-keys-wrap input[type=checkbox]').forEach(c => { c.checked = set.has(c.value); });
+  }
+
   function openModal(devis = null, prefilledPatient = null) {
     document.getElementById('modal-form-overlay').classList.remove('hidden');
     document.body.style.overflow = 'hidden';
@@ -1805,6 +1868,7 @@ Règles :
       document.getElementById('form-montant').value = devis.montant || '';
       document.getElementById('form-date').value = formatDateInput(devis.date_envoi);
       document.getElementById('form-soins').value = devis.soins || '';
+      setCheckedSoinsKeys(devis.soinsKeys);
       document.getElementById('form-notes').value = devis.notes || '';
       // Charger le patient
       if (devis.patient_id) {
@@ -1869,6 +1933,7 @@ Règles :
       montant: document.getElementById('form-montant').value,
       date: document.getElementById('form-date').value,
       soins: document.getElementById('form-soins').value,
+      soinsKeys: getCheckedSoinsKeys(),
       notes: document.getElementById('form-notes').value
     };
     closeModal();
@@ -1888,6 +1953,7 @@ Règles :
     const data = {
       patient_id: selectedPatientForDevis.id,
       soins: document.getElementById('form-soins').value.trim(),
+      soinsKeys: getCheckedSoinsKeys(),
       montant: parseFloat(document.getElementById('form-montant').value) || 0,
       notes: document.getElementById('form-notes').value.trim(),
       date_envoi: dateEnvoi
@@ -1897,6 +1963,7 @@ Règles :
       toast('Devis modifié', 'success');
     } else {
       data.status = 'En attente';
+      data.jeton = makeJeton();
       data.date_relance_prevue = addDays(dateEnvoi, relanceDays);
       data.created_at = new Date().toISOString();
       await db.devis.add(data);
@@ -3172,6 +3239,7 @@ Règles :
           if (pending.date) document.getElementById('form-date').value = pending.date;
           if (pending.soins) document.getElementById('form-soins').value = pending.soins;
           if (pending.notes) document.getElementById('form-notes').value = pending.notes;
+          if (pending.soinsKeys) setCheckedSoinsKeys(pending.soinsKeys);
         }, 100);
         return;
       }
