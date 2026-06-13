@@ -3603,33 +3603,17 @@ Règles :
 
   const DEFAULT_MAINTENANCE_TEMPLATE = `{{salutation}},
 
-J'espère que vous allez bien.
+J'espère que vous allez bien. Le moment approche pour votre prochaine séance de {{type_maintenance}}.
 
-Afin de préserver les bénéfices de vos précédents soins, votre prochaine séance de maintenance parodontale est recommandée prochainement.
+Ce suivi régulier est important : c'est lui qui permet de surveiller et d'entretenir dans la durée les soins que nous avons réalisés ensemble. Mon équipe et moi-même y tenons.
 
-Pour rappel, la parodontite est une maladie inflammatoire d'origine bactérienne qui touche les tissus de soutien de la dent (la gencive et l'os). Ce rendez-vous de suivi régulier est donc essentiel pour maintenir le bon équilibre de votre bouche.
+Vous pouvez prendre rendez-vous directement en ligne :
+[[Prendre rendez-vous|{{lien_rdv}}]]
+ou nous appeler au 01 42 42 94 69.
 
-Il nous permet en effet de :
-- s'assurer de la stabilité de vos gencives
-- réaliser un assainissement professionnel adapté
-- prévenir tout risque de récidive
+Au plaisir de vous revoir au cabinet.
 
-Je vous laisse le soin de planifier ce rendez-vous à votre convenance, directement en ligne ou en contactant le secrétariat du cabinet.
-
-Bien cordialement,
-{{doctor}}
-
-Si vous ne souhaitez plus recevoir ces rappels, répondez simplement « STOP » à ce message.
-
----
-
-Dr KEBIECHE
-Téléphone : 01 42 42 94 69
-
-Diplômé de l'Université Paris Descartes
-Ancien Praticien Hospitalier en Service de Chirurgie Orale
-D.U d'Implantologie et d'Esthétique dentaire - Université d'Evry
-D.U de parodontologie avancé - Université Côte d'Azur`;
+Bien cordialement,`;
 
   const DEFAULT_VULGARIZE_PROMPT = `Rôle :
 Tu es l'assistant(e) virtuel(le) et secrétaire médical(e) du Dr KEBIECHE, chirurgien-dentiste. Ton rôle est de rédiger des emails professionnels, cordiaux, clairs et rassurants à destination des patients, pour leur expliquer leur plan de traitement (devis) à partir des notes cliniques abrégées ci-dessous.
@@ -3700,43 +3684,33 @@ Réponds UNIQUEMENT avec le corps du mail prêt à coller. Pas d'objet, pas de "
 
   const DEFAULT_RELANCE_TEMPLATE_1 = `{{salutation}},
 
-Nous espérons que vous allez bien. Nous souhaitions savoir si vous aviez eu le temps de consulter votre devis concernant les soins à réaliser avec le Dr Kebieche, envoyé le {{date_envoi}}.
+J'espère que vous allez bien. Mon équipe et moi-même revenons vers vous au sujet du devis que nous vous avons adressé le {{date_envoi}}. Prendre le temps de la réflexion est tout à fait normal : nous voulions simplement nous assurer qu'il ne vous manque rien pour décider.
 
-Si vous avez des questions ou besoin de précisions, nous restons à votre disposition pour vous accompagner.
+Si vous avez une question sur les soins eux-mêmes, j'ai préparé une page qui explique chacun des traitements de votre devis, en termes simples :
+[Comprendre mon devis]({{lien_comprendre}})
 
-N'hésitez pas à nous contacter par téléphone au 01 42 42 94 69 ou par retour d'email.
+Pour toute autre question, quelle qu'elle soit, répondez simplement à ce mail ou appelez le cabinet au 01 42 42 94 69 : nous y répondrons avec plaisir.
 
-Bonne journée,
+Et lorsque vous souhaiterez avancer, indiquez-le-nous simplement : mon équipe vous rappellera pour convenir ensemble de vos rendez-vous.
+[[Je souhaite prendre rendez-vous|{{lien_rappel}}]]
 
-L'équipe du Dr KEBIECHE
+Je reste à votre entière disposition.
 
----
-
-Diplômé de l'Université Paris Descartes
-Ancien Praticien Hospitalier en Service de Chirurgie Orale
-D.U d'Implantologie et d'Esthétique dentaire - Université d'Evry
-D.U de parodontologie avancé - Université Côte d'Azur`;
+Bien cordialement,`;
 
   const DEFAULT_RELANCE_TEMPLATE_2 = `{{salutation}},
 
-Nous espérons que vous allez bien depuis notre dernier échange.
+Mon équipe et moi-même nous permettons de revenir vers vous une dernière fois au sujet de votre devis du {{date_envoi}}. Je tenais simplement à vous laisser tout le temps nécessaire pour décider, sans aucune pression.
 
-Nous revenons vers vous concernant le plan de traitement établi avec le Dr Kebieche. Nous comprenons tout à fait que vous puissiez avoir un emploi du temps chargé ou que vous ayez simplement choisi de différer vos soins à une période plus propice.
+Il n'y a aucune urgence de notre côté : votre dossier reste ouvert au cabinet, et vous pourrez y revenir au moment qui vous conviendra.
 
-Sachez qu'il n'y a aucune urgence de notre côté. Votre dossier reste ouvert et si vous souhaitez reprendre contact pour planifier vos rendez-vous, ou si vous avez besoin d'échanger à nouveau sur le devis, nous sommes là pour vous.
+Si une simple explication peut vous aider, le détail de votre devis reste consultable ici :
+[Comprendre mon devis]({{lien_comprendre}})
 
-N'hésitez pas à nous joindre au 01 42 42 94 69 ou par retour d'e-mail lorsque vous le jugerez opportun.
+Et le jour où vous le souhaiterez, indiquez-le-nous : mon équipe vous rappellera pour organiser vos rendez-vous.
+[[Je souhaite prendre rendez-vous|{{lien_rappel}}]]
 
-Nous vous souhaitons une excellente journée,
-
-L'équipe du Dr KEBIECHE
-
----
-
-Diplômé de l'Université Paris Descartes
-Ancien Praticien Hospitalier en Service de Chirurgie Orale
-D.U d'Implantologie et d'Esthétique dentaire - Université d'Evry
-D.U de parodontologie avancé - Université Côte d'Azur`;
+Bien cordialement,`;
 
   // Legacy unified template (for backward compatibility — uses template 1 if no specific value set)
   const DEFAULT_RELANCE_TEMPLATE = DEFAULT_RELANCE_TEMPLATE_1;
@@ -3744,20 +3718,16 @@ D.U de parodontologie avancé - Université Côte d'Azur`;
   // v2.5.6 — Template mail d'avis Google (technique "évacuation interne")
   const DEFAULT_GOOGLE_REVIEW_TEMPLATE = `{{salutation}},
 
-J'espère que tout s'est bien passé et que vous allez bien depuis votre passage au cabinet.
+J'espère que vous allez bien depuis votre dernier passage au cabinet.
 
-Avant tout, si vous avez la moindre question, gêne, ou si quelque chose ne vous convient pas, n'hésitez pas à me répondre directement à ce mail — je préfère mille fois en discuter avec vous qu'apprendre un souci autrement.
+Mon équipe et moi-même avons à cœur de nous assurer de votre confort. Si vous avez la moindre question ou besoin d'un conseil concernant votre suivi, il vous suffit de répondre à ce mail : je reste à votre entière disposition.
 
-Si tout va bien et que vous avez été satisfait·e de votre prise en charge, un avis Google m'aiderait énormément à faire connaître le cabinet à d'autres patients qui hésitent. C'est court (2 minutes) et précieux :
+Et si vous avez apprécié votre prise en charge, partager votre expérience sur Google aiderait d'autres patients à nous accorder leur confiance plus sereinement :
+[[Laisser un avis|{{lien_google}}]]
 
-👉 {{lien_google}}
+En vous remerciant de votre confiance, je vous souhaite une excellente journée.
 
-Merci pour votre confiance et bonne continuation.
-
-Bien cordialement,
-
----
-{{doctor}}`;
+Bien cordialement,`;
 
   // v2.5.12 — Migration template avis : retire la phrase "votre soin ({{soins}})" maladroite
   // pour les patients sans devis. Ne touche QUE si l'ancienne phrase exacte est présente
@@ -3771,6 +3741,26 @@ Bien cordialement,
       localStorage.setItem('melyia_googleReviewTemplate', saved.replace(oldPhrase, newPhrase));
       console.log('[Melyia] Template avis migré v2.5.12 (parenthèse soin retirée)');
     }
+  })();
+
+  // v2.6.0 — Migration douce : reecrit un template sauvegarde SEULEMENT s'il
+  // contient une formule a risque (ancienne signature deonto, emoji, branding).
+  // Sinon on laisse le template personnalise intact.
+  (function migrateTemplatesV260(){
+    const BANNED = ['Praticien Hospitalier', 'parodontologie avancé', '👉', 'Dr KEBIECHE', "L'équipe du Dr", "Université d'Evry", 'Paris Descartes'];
+    const map = {
+      melyia_relanceTemplate: DEFAULT_RELANCE_TEMPLATE_1,
+      melyia_relanceTemplate2: DEFAULT_RELANCE_TEMPLATE_2,
+      melyia_maintenanceTemplate: DEFAULT_MAINTENANCE_TEMPLATE,
+      melyia_googleReviewTemplate: DEFAULT_GOOGLE_REVIEW_TEMPLATE
+    };
+    let n = 0;
+    Object.keys(map).forEach(function(k){
+      const saved = localStorage.getItem(k);
+      if (!saved) return;
+      if (BANNED.some(function(b){ return saved.indexOf(b) !== -1; })) { localStorage.setItem(k, map[k]); n++; }
+    });
+    if (n) console.log('[Melyia] ' + n + ' template(s) migre(s) v2.6.0 (signature/voix)');
   })();
 
   function renderSettings() {
@@ -4482,6 +4472,7 @@ Bien cordialement,
       .replaceAll('{{prenom}}', patient.prenom || '')
       .replaceAll('{{nom}}', patient.nom || '')
       .replaceAll('{{type_maintenance}}', typeLabel)
+      .replaceAll('{{lien_rdv}}', DOCTOLIB_BOOKING_URL)
       .replaceAll('{{doctor}}', doctor);
 
     const html = `
@@ -4658,6 +4649,8 @@ Bien cordialement,
       ? getSetting('relanceTemplate2', DEFAULT_RELANCE_TEMPLATE_2)
       : getSetting('relanceTemplate', DEFAULT_RELANCE_TEMPLATE_1);
     const doctorName = (getSetting('doctorName', '') || '').trim() || 'Votre dentiste';
+    const relUtm = isSecondRelance ? UTM_RELANCE2 : UTM_RELANCE;
+    if (!devis.jeton) { devis.jeton = makeJeton(); try { await db.devis.update(devis.id, { jeton: devis.jeton }); } catch (e) {} }
     const filled = template
       .replaceAll('{{salutation}}', buildSalutation(pInfo))
       .replaceAll('{{civilite}}', titreOf(pInfo))
@@ -4666,6 +4659,8 @@ Bien cordialement,
       .replaceAll('{{nom}}', pInfo.nom || '')
       .replaceAll('{{soins}}', devis.soins || '')
       .replaceAll('{{date_envoi}}', formatDate(devis.date_envoi))
+      .replaceAll('{{lien_comprendre}}', buildComprendreUrl(devis.soinsKeys, relUtm))
+      .replaceAll('{{lien_rappel}}', buildRappelUrl(devis.jeton, relUtm))
       .replaceAll('{{doctor}}', doctorName);
     const subjectDefault = `Suite à votre devis du ${formatDate(devis.date_envoi)}`;
     const userEmail = getSetting('googleUserEmail', '');
