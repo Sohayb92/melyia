@@ -1478,6 +1478,25 @@
     return SITE_URL + '/rappel?r=' + encodeURIComponent(jeton || '') + (utm ? '&' + utm : '');
   }
 
+  // Signature plein texte (bloc Logos : collé en clair dans Logos, pas d'écrin HTML).
+  const SIGNATURE_PLAIN = `Bien cordialement,
+Dr Sohaïb Kebieche
+Chirurgien-dentiste — Cabinet Dentaire La Cabane
+31 rue Félix Faure, 92700 Colombes
+01 42 42 94 69 · drkebieche.fr`;
+
+  // Pied du bloc Logos : 2 liens (comprendre + rappel si jeton) + signature corrigée.
+  function buildLogosFooter(devis) {
+    const comprendre = buildComprendreUrl(devis ? devis.soinsKeys : [], UTM_DEVIS);
+    let f = "\n\nPour comprendre vos soins simplement, j'ai préparé une page qui explique chacun des traitements de votre devis :\n" + comprendre + "\n\n";
+    if (devis && devis.jeton) {
+      f += "Pour prendre rendez-vous, le plus simple est que mon équipe vous rappelle :\n" + buildRappelUrl(devis.jeton, UTM_DEVIS) + "\nou appelez-nous directement au 01 42 42 94 69.\n\n";
+    } else {
+      f += "Pour prendre rendez-vous ou pour toute question, appelez-nous au 01 42 42 94 69.\n\n";
+    }
+    return f + SIGNATURE_PLAIN;
+  }
+
   // ========================================
   // MAINTENANCES HELPERS
   // ========================================
@@ -2051,6 +2070,7 @@ Règles :
       <div class="space-y-2 mb-2">
         ${!isClosed ? `
           ${pInfo.email && GoogleAuth.isConnected() ? `<button class="action-btn btn btn-primary w-full" data-action="send-mail-relance"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg> Envoyer la relance par mail</button>` : ''}
+          <button class="action-btn btn btn-secondary w-full" data-action="vulgarize-logos"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg> Générer le mail d'explication (Logos)</button>
           <div class="grid grid-cols-2 gap-2">
             <button class="action-btn btn btn-success" data-action="accepted">✓ Accepté</button>
             <button class="action-btn btn btn-secondary" data-action="refused">Refusé</button>
@@ -2082,6 +2102,12 @@ Règles :
         const action = btn.dataset.action;
         if (action === 'send-mail-relance') {
           openComposeRelanceModal(devis, pInfo);
+          return;
+        }
+        if (action === 'vulgarize-logos') {
+          if (!devis.jeton) { devis.jeton = makeJeton(); try { await db.devis.update(id, { jeton: devis.jeton }); } catch (e) {} }
+          closeDetail();
+          openVulgarizeModal(devis.soins || '', devis);
           return;
         }
         if (action === 'relancer') {
@@ -3594,7 +3620,7 @@ Au plaisir de vous revoir au cabinet.
 Bien cordialement,`;
 
   const DEFAULT_VULGARIZE_PROMPT = `Rôle :
-Tu es l'assistant(e) virtuel(le) et secrétaire médical(e) du Dr KEBIECHE, chirurgien-dentiste. Ton rôle est de rédiger des emails professionnels, cordiaux, clairs et rassurants à destination des patients, pour leur expliquer leur plan de traitement (devis) à partir des notes cliniques abrégées ci-dessous.
+Tu es l'assistant(e) virtuel(le) et secrétaire médical(e) du Dr Kebieche, chirurgien-dentiste. Ton rôle est de rédiger des emails professionnels, cordiaux, clairs et rassurants à destination des patients, pour leur expliquer leur plan de traitement (devis) à partir des notes cliniques abrégées ci-dessous.
 
 Actes / mots-clés : {{soins}}
 
@@ -3649,16 +3675,7 @@ Je vous laisse envoyer les devis à votre mutuelle pour connaître votre niveau 
 
 N'hésitez pas à me solliciter si vous avez la moindre interrogation.
 
-Bien cordialement,
-Dr KEBIECHE
-Téléphone : 01 42 42 94 69
-
-Diplômé de l'Université Paris Descartes
-Ancien Praticien Hospitalier en Service de Chirurgie Orale
-D.U d'Implantologie et d'Esthétique dentaire - Université d'Evry
-D.U de parodontologie avancé - Université Côte d'Azur
-
-Réponds UNIQUEMENT avec le corps du mail prêt à coller. Pas d'objet, pas de "Voici le mail :", juste le texte. Termine toujours par le bloc de signature complet (Bien cordialement / Dr KEBIECHE / téléphone / 4 diplômes).`;
+Réponds UNIQUEMENT avec le corps du mail prêt à coller. Pas d'objet, pas de "Voici le mail :", juste le texte. Termine par une phrase de disponibilité (par exemple « Je reste à votre disposition pour toute question. »). N'ajoute NI formule de politesse finale (« Bien cordialement »), NI signature, NI diplômes : la signature et les liens du cabinet sont ajoutés automatiquement après ton texte.`;
 
   const DEFAULT_RELANCE_TEMPLATE_1 = `{{salutation}},
 
@@ -4536,7 +4553,9 @@ Bien cordialement,`;
   // ========================================
   // VULGARIZE DEVIS (générer mail explicatif Gemini)
   // ========================================
-  function openVulgarizeModal(prefilledKeywords = '') {
+  let currentVulgarizeDevis = null;
+  function openVulgarizeModal(prefilledKeywords = '', devisCtx = null) {
+    currentVulgarizeDevis = devisCtx;
     if (!getSetting('apiKey', '')) {
       toast('Configure ta clé Gemini dans Réglages', 'warning');
       navigate('settings');
@@ -4576,7 +4595,7 @@ Bien cordialement,`;
       const doctor = (getSetting('doctorName', '') || '').trim() || 'Votre dentiste';
       const prompt = promptTemplate.split('{{soins}}').join(keywords).split('{{doctor}}').join(doctor);
       const result = await geminiGenerateText(prompt, { temperature: 0.7, maxOutputTokens: 4096 });
-      document.getElementById('vulgarize-output').value = result;
+      document.getElementById('vulgarize-output').value = result.replace(/\s+$/, '') + buildLogosFooter(currentVulgarizeDevis);
       document.getElementById('vulgarize-result-block').classList.remove('hidden');
       status.textContent = '✓ Généré';
       status.className = 'text-[12px] text-success';
