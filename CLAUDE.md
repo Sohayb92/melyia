@@ -31,6 +31,8 @@ Stack : monolithe `melyia.html` (~5000 lignes) + mirror PWA `web/index.html`. Re
 - `project_kebieche_cabinet.md` — profil pro user
 - `project_melyia_statut_accepte_semantique.md` — "Accepté" = RDV pris ≠ soin fait
 - `project_melyia_perimetre_patients.md` — Mélyia couvre que les patients avec devis
+- `project_melyia_workflow_rdv_secretaire.md` — RDV soins = secrétaire (jamais Doctolib) ; Doctolib = maintenance only
+- `reference_site_devis_links.md` — liens mails→site : /comprendre-mon-devis?soins=… + /rappel?r=jeton&p=nom (CTA « Je souhaite prendre rendez-vous »)
 - `reference_google_oauth_setup.md` — config OAuth (Production mode depuis 2026-05-21)
 - `reference_google_review_url.md` — lien GBP du cabinet
 - `project_marketing_gbp_sprint_dormant.md` — levier ROI #1 jamais démarré
@@ -47,6 +49,7 @@ Stack : monolithe `melyia.html` (~5000 lignes) + mirror PWA `web/index.html`. Re
 - Bypass règle 1 (plan avant code) sous prétexte que c'est "petit"
 - Mentir sur des faits (ex: APHP au présent alors que le user a arrêté en 2025)
 - Push géant en fin de release (commit par étape, règle 3)
+- Lien Doctolib pour des RDV de SOINS (Doctolib = maintenance only ; soins = secrétaire). Ni discours coût/prise en charge dans les mails patients.
 
 ## Commandes utiles
 - Build installer : `npx electron-builder --win nsis` (output `dist-electron/Melyia-Setup-{version}.exe`)
