@@ -1391,6 +1391,40 @@
   }
 
   // ========================================
+  // LIENS PATIENT (site drkebieche.fr) — v2.6.0
+  // Jeton opaque par devis + URLs (comprendre-mon-devis / rappel) + UTM agrégés.
+  // Aucune donnée de santé ni nominative dans les URLs (RGPD-safe).
+  // ========================================
+  const SITE_URL = 'https://drkebieche.fr';
+  const UTM_DEVIS    = 'utm_source=melyia&utm_medium=email&utm_campaign=devis';
+  const UTM_RELANCE  = 'utm_source=melyia&utm_medium=email&utm_campaign=relance';
+  const UTM_RELANCE2 = 'utm_source=melyia&utm_medium=email&utm_campaign=relance2';
+  const UTM_AVIS     = 'utm_source=melyia&utm_medium=email&utm_campaign=avis';
+  const UTM_MAINT    = 'utm_source=melyia&utm_medium=email&utm_campaign=maintenance';
+  const DOCTOLIB_BOOKING_URL = 'https://www.doctolib.fr/dentiste/colombes/sohaib-kebieche-colombes';
+
+  // Jeton opaque court (sans 0/O/1/l/I pour éviter toute ambiguïté de lecture).
+  function makeJeton() {
+    const a = 'abcdefghjkmnpqrstuvwxyz23456789';
+    const r = crypto.getRandomValues(new Uint8Array(6));
+    return Array.from(r, b => a[b % a.length]).join('');
+  }
+
+  // URL « Comprendre mon devis » filtrée sur les soins du devis (clés du site).
+  function buildComprendreUrl(soinsKeys, utm) {
+    const keys = (soinsKeys || []).filter(Boolean);
+    const qs = [];
+    if (keys.length) qs.push('soins=' + keys.map(encodeURIComponent).join(','));
+    if (utm) qs.push(utm);
+    return SITE_URL + '/comprendre-mon-devis' + (qs.length ? '?' + qs.join('&') : '');
+  }
+
+  // URL « Je souhaite prendre rendez-vous » → page /rappel (le cabinet rappelle).
+  function buildRappelUrl(jeton, utm) {
+    return SITE_URL + '/rappel?r=' + encodeURIComponent(jeton || '') + (utm ? '&' + utm : '');
+  }
+
+  // ========================================
   // MAINTENANCES HELPERS
   // ========================================
   async function getMaintenancesForPatient(patientId) {
