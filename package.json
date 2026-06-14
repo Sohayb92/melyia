@@ -1,6 +1,6 @@
 {
   "name": "melyia",
-  "version": "2.6.15",
+  "version": "2.6.16",
   "description": "Suivi de devis dentaires - app native Windows",
   "main": "app/main.js",
   "private": true,
