@@ -1465,9 +1465,18 @@
 
   // Jeton opaque court (sans 0/O/1/l/I pour éviter toute ambiguïté de lecture).
   function makeJeton() {
-    const a = 'abcdefghjkmnpqrstuvwxyz23456789';
-    const r = crypto.getRandomValues(new Uint8Array(6));
-    return Array.from(r, b => a[b % a.length]).join('');
+    // Jeton opaque ~20 caractères (~99 bits) : protège une donnée de santé en KV.
+    // Rejection sampling (seuil 248 = 8*31) pour éviter le biais modulo. Sans 0/O/1/l/I.
+    const a = 'abcdefghjkmnpqrstuvwxyz23456789'; // 31 symboles non ambigus
+    const out = [];
+    const buf = new Uint8Array(28);
+    while (out.length < 20) {
+      crypto.getRandomValues(buf);
+      for (let i = 0; i < buf.length && out.length < 20; i++) {
+        if (buf[i] < 248) out.push(a[buf[i] % 31]);
+      }
+    }
+    return out.join('');
   }
 
   // URL « Comprendre mon devis » filtrée sur les soins du devis (clés du site).

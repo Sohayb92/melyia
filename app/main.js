@@ -16,11 +16,7 @@ if (!gotLock) {
   app.quit();
 } else {
   app.on('second-instance', () => {
-    if (mainWindow) {
-      if (mainWindow.isMinimized()) mainWindow.restore();
-      mainWindow.show();
-      mainWindow.focus();
-    }
+    showWindow(); // centralise restore/show/focus + webContents.focus (sinon champs non editables)
   });
 }
 
