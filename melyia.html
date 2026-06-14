@@ -2302,6 +2302,8 @@ Règles :
     const isRelanceDue = (devis.status === 'En attente' || devis.status === 'Relancé') && new Date(devis.date_relance_prevue).getTime() <= Date.now();
     const displayStatus = isRelanceDue ? 'Relance due' : devis.status;
     const isClosed = ['Accepté', 'Refusé', 'Sans réponse'].includes(devis.status);
+    const hasBeenSent = !!devis.devisMailSentAt || relances.length > 0 || devis.status === 'Relancé';
+    const canMail = !!(pInfo.email && GoogleAuth.isConnected());
 
     const html = `
       <div class="flex items-center justify-between mb-4">
@@ -2370,26 +2372,37 @@ Règles :
       <div class="text-[12px] uppercase tracking-wider text-ink-500 font-semibold ml-1 mb-1.5">Actions</div>
       <div class="space-y-2 mb-2">
         ${!isClosed ? `
-          ${pInfo.email && GoogleAuth.isConnected() ? `<button class="action-btn btn btn-primary w-full" data-action="send-mail-relance"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg> Envoyer la relance par mail</button>` : ''}
-          ${pInfo.email && GoogleAuth.isConnected() ? `<button class="action-btn btn btn-primary w-full" data-action="envoyer-devis"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg> Envoyer le devis au patient</button>` : ''}
-          <button class="action-btn btn btn-secondary w-full" data-action="vulgarize-logos"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg> Générer le mail d'explication (Logos)</button>
-          <button class="action-btn btn btn-secondary w-full" data-action="copier-lien-patient"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg> Copier le lien page patient</button>
+          ${canMail
+            ? (hasBeenSent
+                ? `<button class="action-btn btn btn-primary w-full" data-action="send-mail-relance">Envoyer la relance par mail</button>`
+                : `<button class="action-btn btn btn-primary w-full" data-action="envoyer-devis">Envoyer le devis au patient</button>`)
+            : `<div class="text-[12px] text-ink-500 text-center py-1.5">Connecte ton Gmail (Réglages) pour envoyer.</div>`}
           <div class="grid grid-cols-2 gap-2">
             <button class="action-btn btn btn-success" data-action="accepted">✓ Accepté</button>
             <button class="action-btn btn btn-secondary" data-action="refused">Refusé</button>
           </div>
-          ${devis.status === 'En attente' ? `<button class="action-btn btn btn-secondary w-full" data-action="relancer">Marquer comme relancé (sans envoyer de mail)</button>` : ''}
-          ${devis.status === 'Relancé' ? `<button class="action-btn btn btn-secondary w-full" data-action="noresponse">Sans réponse</button>` : ''}
+          <button class="action-btn btn btn-secondary w-full" data-action="toggle-more">Plus d'actions…</button>
+          <div id="more-actions" class="space-y-2 hidden">
+            ${canMail && hasBeenSent ? `<button class="action-btn btn btn-secondary w-full" data-action="envoyer-devis">Renvoyer le devis (PDF)</button>` : ''}
+            <button class="action-btn btn btn-secondary w-full" data-action="vulgarize-logos">Générer le mail d'explication (Logos)</button>
+            <button class="action-btn btn btn-secondary w-full" data-action="copier-lien-patient">Copier le lien page patient</button>
+            ${devis.status === 'En attente' ? `<button class="action-btn btn btn-secondary w-full" data-action="relancer">Marquer relancé (sans mail)</button>` : ''}
+            ${devis.status === 'Relancé' ? `<button class="action-btn btn btn-secondary w-full" data-action="noresponse">Sans réponse</button>` : ''}
+            <button id="delete-devis-btn" class="btn btn-secondary w-full" style="color:#FF3B30">Supprimer ce devis</button>
+          </div>
         ` : `
           ${devis.status === 'Accepté' ? (
             !devis.soinTermine
-              ? `<button class="action-btn btn btn-primary w-full" data-action="soin-termine"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg> Marquer soin terminé</button>`
+              ? `<button class="action-btn btn btn-primary w-full" data-action="soin-termine">✓ Marquer soin terminé</button>`
               : `<div class="flex items-center justify-between gap-2 p-3 rounded-xl bg-success/10 border border-success/30"><div class="text-[13px] text-ink-700"><span class="font-semibold text-success">✓ Soin terminé</span>${devis.dateSoinTermine ? ` le ${formatDate(devis.dateSoinTermine)}` : ''}</div><button class="action-btn text-[12px] text-ink-500 hover:text-ink-900 underline" data-action="undo-soin-termine">annuler</button></div>`
           ) : ''}
           <button class="action-btn btn btn-secondary w-full" data-action="reopen">↺ Remettre en attente</button>
+          <button class="action-btn btn btn-secondary w-full" data-action="toggle-more">Plus d'actions…</button>
+          <div id="more-actions" class="space-y-2 hidden">
+            <button id="delete-devis-btn" class="btn btn-secondary w-full" style="color:#FF3B30">Supprimer ce devis</button>
+          </div>
         `}
       </div>
-      <button id="delete-devis-btn" class="text-[13px] text-danger/70 hover:text-danger block mx-auto mt-3 mb-1">Supprimer ce devis</button>
     `;
     document.getElementById('modal-detail-content').innerHTML = html;
     document.getElementById('modal-detail-overlay').classList.remove('hidden');
@@ -2403,6 +2416,7 @@ Règles :
     document.querySelectorAll('.action-btn').forEach(btn => {
       btn.addEventListener('click', async () => {
         const action = btn.dataset.action;
+        if (action === 'toggle-more') { const m = document.getElementById('more-actions'); if (m) m.classList.toggle('hidden'); return; }
         if (action === 'send-mail-relance') {
           openComposeRelanceModal(devis, pInfo);
           return;
