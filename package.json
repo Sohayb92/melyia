@@ -28,6 +28,7 @@
     },
     "files": [
       "app/**/*",
+      "node_modules/pdf-parse/**/*",
       "!node_modules/electron/**/*",
       "!node_modules/electron-builder/**/*"
     ],
