@@ -1583,7 +1583,7 @@
   const SOIN_LABELS = {
     implant: "Pose d'implant", comblement: "Comblement osseux", 'greffe-osseuse': "Reconstruction osseuse pré-implantaire", 'chirurgie-orale': "Chirurgie orale", dds: "Dents de sagesse",
     paro: "Traitement parodontal (gencives)", 'greffe-gencive': "Greffe de gencive", 'maintenance-paro': "Maintenance parodontale",
-    overlay: "Inlay / onlay / overlay céramique", composite: "Composite", couronne: "Couronne", bridge: "Bridge", 'couronne-implant': "Couronne sur implant", amovible: "Prothèse amovible",
+    overlay: "Overlay céramique", composite: "Composite", couronne: "Couronne", bridge: "Bridge", 'couronne-implant': "Couronne sur implant", amovible: "Prothèse amovible",
     carie: "Soin de carie", te: "Traitement de racine (dévitalisation)", rte: "Retraitement de racine", detartrage: "Détartrage", blanchiment: "Blanchiment"
   };
   // Liste « plan de traitement » pour le mail : à partir des tags soins, sinon le texte libre.
@@ -4035,7 +4035,7 @@ TU RÉPONDS UNIQUEMENT EN JSON STRICT, sans aucun texte autour ni balise de code
 }
 
 RÈGLES
-0. SOURCE DU CONTENU : utilise EN PRIORITÉ « MES TEXTES DE RÉFÉRENCE » ci-dessus comme matière du « pourquoi » (paragraphes[0]) et du « déroulé » (paragraphes[1]). Tu les ASSEMBLES en une histoire cohérente (transitions fluides), tu les adaptes légèrement et tu injectes les noms de dents — mais tu n'inventes AUCUN contenu clinique nouveau et tu n'omets rien d'important. Reprends le "titre" et le "CONSEIL" fournis quand ils existent. Si un soin n'a pas de texte de référence, rédige sobrement et brièvement.
+0. SOURCE DU CONTENU : utilise EN PRIORITÉ « MES TEXTES DE RÉFÉRENCE » ci-dessus comme matière du « pourquoi » (paragraphes[0]) et du « déroulé » (paragraphes[1]). Tu les ASSEMBLES en une histoire cohérente (transitions fluides), tu les adaptes légèrement et tu injectes les noms de dents — mais tu n'inventes AUCUN contenu clinique nouveau et tu n'omets rien d'important. Reprends le "titre" et le "CONSEIL" fournis quand ils existent. Si un soin n'a pas de texte de référence, rédige sobrement et brièvement. Les TEXTES DE RÉFÉRENCE (basés sur les clés validées par le praticien) font AUTORITÉ sur la NATURE de chaque soin : si un libellé brut dans {{soins}} nomme le soin autrement (ex. « couronne » alors que la référence décrit un overlay), suis la RÉFÉRENCE. NE change JAMAIS la nature d'un soin — un inlay/onlay/overlay est une « pièce » céramique qui s'imbrique sur la dent, JAMAIS une « couronne ».
 1. STRUCTURE PAR PHASE clinique (intention), jamais une liste d'actes. Regroupe par intention (ex. « reprise de la racine » ; « reconstitution + nouvelle couronne » ; « assainissement parodontal »). MAX 3 phases. Une seule dent ⇒ 1 à 2 phases. N'invente pas de phases pour « faire riche ».
 2. CHAQUE phase, champ "paragraphes" : [0] = LE POURQUOI (ce qu'est le problème et ce que le soin vise — 1 à 3 phrases, TOUJOURS visible) ; [1] = LE DÉROULÉ (comment ça se passe concrètement — 1 à 3 phrases, replié sur la page). Acte simple/rassurant (composite, détartrage, overlay) : un seul paragraphe (le pourquoi) suffit.
 3. SYNTHÉTISE les étapes techniques en une histoire. NE LISTE JAMAIS les actes intermédiaires bruts. Synthèses imposées :
@@ -5237,7 +5237,7 @@ Bien cordialement,`;
             .split('{{notes}}').join(devis.notes ? String(devis.notes) : '(aucune)')
             .split('{{soinsKeys}}').join((mdKeys || []).join(', '))
             .split('{{reference}}').join(buildSoinReference(mdKeys));
-          const recit = parseGeminiJson(await geminiGenerateText(prompt, { temperature: 0.5, maxOutputTokens: 8192 }));
+          const recit = parseGeminiJson(await geminiGenerateText(prompt, { temperature: 0.3, maxOutputTokens: 8192 }));
           recit.salutation = buildSalutation(pInfo);
           recit.nom = patientFullName(pInfo);
           recit.jeton = devis.jeton;
