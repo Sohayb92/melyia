@@ -3812,7 +3812,10 @@ Voici les soins que nous avons prévus ensemble :
 Pour comprendre chacun de ces soins simplement, j'ai préparé une page personnelle, avec des schémas, à relire à tête reposée :
 [Voir mon devis expliqué]({{lien_comprendre}})
 
-Le devis ci-joint fait référence. Pour toute question, répondez simplement à ce mail ou appelez le cabinet au 01 42 42 94 69.
+Et lorsque vous souhaiterez avancer, indiquez-le-nous simplement : mon équipe vous rappellera pour organiser vos rendez-vous.
+[[Je souhaite prendre rendez-vous|{{lien_rappel}}]]
+
+Le devis ci-joint fait référence. Pour toute question, répondez à ce mail ou appelez le cabinet au 01 42 42 94 69.
 
 Bien cordialement,`;
 
@@ -4768,6 +4771,7 @@ Bien cordialement,`;
       .replaceAll('{{nom}}', pInfo.nom || '')
       .replaceAll('{{lien_comprendre}}', buildMonDevisUrl(devis.jeton, pInfo, mdKeys, UTM_DEVIS))
       .replaceAll('{{plan}}', buildPlanList(devis))
+      .replaceAll('{{lien_rappel}}', buildRappelUrl(devis.jeton, UTM_DEVIS, patientFullName(pInfo)))
       .replaceAll('{{doctor}}', doctorName);
     const userEmail = getSetting('googleUserEmail', '');
     const html = `
