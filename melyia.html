@@ -1485,6 +1485,32 @@
     return SITE_URL + '/rappel?' + q;
   }
 
+  // Page patient premium : /mon-devis#<base64url(JSON)> (données dans le fragment,
+  // jamais envoyées au serveur). JSON = { p: salutation, n: nom, j: jeton, s: clés }.
+  function buildMonDevisUrl(jeton, patObj, soinsKeys, utm) {
+    const obj = {
+      p: patObj ? buildSalutation(patObj) : '',
+      n: patObj ? patientFullName(patObj) : '',
+      j: jeton || '',
+      s: (soinsKeys || []).filter(Boolean)
+    };
+    const b64 = btoa(unescape(encodeURIComponent(JSON.stringify(obj)))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    return SITE_URL + '/mon-devis' + (utm ? '?' + utm : '') + '#' + b64;
+  }
+
+  // Agrège les clés de soins de TOUS les devis non-refusés d'un patient (multi-devis
+  // → une seule page patient). Inclut toujours les clés du devis courant.
+  async function patientSoinsKeys(patientId, currentDevis) {
+    let keys = (currentDevis && Array.isArray(currentDevis.soinsKeys)) ? currentDevis.soinsKeys.slice() : [];
+    if (patientId) {
+      try {
+        const list = await db.devis.where('patient_id').equals(patientId).toArray();
+        list.forEach(d => { if (d.status !== 'Refusé' && Array.isArray(d.soinsKeys)) keys = keys.concat(d.soinsKeys); });
+      } catch (e) {}
+    }
+    return [...new Set(keys.filter(Boolean))];
+  }
+
   // Signature plein texte (bloc Logos : collé en clair dans Logos, pas d'écrin HTML).
   const SIGNATURE_PLAIN = `Bien cordialement,
 Dr Sohaïb Kebieche
@@ -1493,11 +1519,12 @@ Chirurgien-dentiste — Cabinet Dentaire La Cabane
 01 42 42 94 69 · drkebieche.fr`;
 
   // Pied du bloc Logos : 2 liens (comprendre + rappel si jeton) + signature corrigée.
-  function buildLogosFooter(devis, patientName) {
-    const comprendre = buildComprendreUrl(devis ? devis.soinsKeys : [], UTM_DEVIS);
-    let f = "\n\nPour comprendre vos soins simplement, j'ai préparé une page qui explique chacun des traitements de votre devis :\n" + comprendre + "\n\n";
+  function buildLogosFooter(devis, patObj, soinsKeys) {
+    const nom = patObj ? patientFullName(patObj) : '';
+    const lien = buildMonDevisUrl(devis ? devis.jeton : '', patObj, soinsKeys, UTM_DEVIS);
+    let f = "\n\nPour comprendre vos soins simplement et retrouver le détail de votre devis, j'ai préparé une page rien que pour vous :\n" + lien + "\n\n";
     if (devis && devis.jeton) {
-      f += "Pour prendre rendez-vous, le plus simple est que mon équipe vous rappelle :\n" + buildRappelUrl(devis.jeton, UTM_DEVIS, patientName) + "\nou appelez-nous directement au 01 42 42 94 69.\n\n";
+      f += "Pour prendre rendez-vous, le plus simple est que mon équipe vous rappelle :\n" + buildRappelUrl(devis.jeton, UTM_DEVIS, nom) + "\nou appelez-nous directement au 01 42 42 94 69.\n\n";
     } else {
       f += "Pour prendre rendez-vous ou pour toute question, appelez-nous au 01 42 42 94 69.\n\n";
     }
@@ -2078,6 +2105,7 @@ Règles :
         ${!isClosed ? `
           ${pInfo.email && GoogleAuth.isConnected() ? `<button class="action-btn btn btn-primary w-full" data-action="send-mail-relance"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg> Envoyer la relance par mail</button>` : ''}
           <button class="action-btn btn btn-secondary w-full" data-action="vulgarize-logos"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg> Générer le mail d'explication (Logos)</button>
+          <button class="action-btn btn btn-secondary w-full" data-action="copier-lien-patient"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg> Copier le lien page patient</button>
           <div class="grid grid-cols-2 gap-2">
             <button class="action-btn btn btn-success" data-action="accepted">✓ Accepté</button>
             <button class="action-btn btn btn-secondary" data-action="refused">Refusé</button>
@@ -2115,6 +2143,14 @@ Règles :
           if (!devis.jeton) { devis.jeton = makeJeton(); try { await db.devis.update(id, { jeton: devis.jeton }); } catch (e) {} }
           closeDetail();
           openVulgarizeModal(devis.soins || '', devis);
+          return;
+        }
+        if (action === 'copier-lien-patient') {
+          if (!devis.jeton) { devis.jeton = makeJeton(); try { await db.devis.update(id, { jeton: devis.jeton }); } catch (e) {} }
+          const mk = await patientSoinsKeys(pInfo && pInfo.id, devis);
+          const url = buildMonDevisUrl(devis.jeton, pInfo, mk, UTM_DEVIS);
+          try { await navigator.clipboard.writeText(url); toast('Lien page patient copié', 'success'); }
+          catch (e) { window.prompt('Lien page patient :', url); }
           return;
         }
         if (action === 'relancer') {
@@ -4610,7 +4646,8 @@ Bien cordialement,`;
       let corps = result.replace(/\n+\s*Bien cordialement[\s\S]*$/i, '').replace(/\s+$/, '');
       // Salutation : forcer celle du dossier patient (civilité + nom) si on l'a.
       if (patObj) corps = corps.replace(/^\s*(?:Cher|Chère|Bonjour|Madame|Monsieur)[^\n]*,\s*/i, buildSalutation(patObj) + ',\n\n');
-      document.getElementById('vulgarize-output').value = corps + buildLogosFooter(currentVulgarizeDevis, patientName);
+      const mdKeys = await patientSoinsKeys(currentVulgarizeDevis && currentVulgarizeDevis.patient_id, currentVulgarizeDevis);
+      document.getElementById('vulgarize-output').value = corps + buildLogosFooter(currentVulgarizeDevis, patObj, mdKeys);
       document.getElementById('vulgarize-result-block').classList.remove('hidden');
       status.textContent = '✓ Généré';
       status.className = 'text-[12px] text-success';
@@ -4681,6 +4718,7 @@ Bien cordialement,`;
     const doctorName = (getSetting('doctorName', '') || '').trim() || 'Votre dentiste';
     const relUtm = isSecondRelance ? UTM_RELANCE2 : UTM_RELANCE;
     if (!devis.jeton) { devis.jeton = makeJeton(); try { await db.devis.update(devis.id, { jeton: devis.jeton }); } catch (e) {} }
+    const mdKeys = await patientSoinsKeys(pInfo && pInfo.id, devis);
     const filled = template
       .replaceAll('{{salutation}}', buildSalutation(pInfo))
       .replaceAll('{{civilite}}', titreOf(pInfo))
@@ -4689,7 +4727,7 @@ Bien cordialement,`;
       .replaceAll('{{nom}}', pInfo.nom || '')
       .replaceAll('{{soins}}', devis.soins || '')
       .replaceAll('{{date_envoi}}', formatDate(devis.date_envoi))
-      .replaceAll('{{lien_comprendre}}', buildComprendreUrl(devis.soinsKeys, relUtm))
+      .replaceAll('{{lien_comprendre}}', buildMonDevisUrl(devis.jeton, pInfo, mdKeys, relUtm))
       .replaceAll('{{lien_rappel}}', buildRappelUrl(devis.jeton, relUtm, patientFullName(pInfo)))
       .replaceAll('{{doctor}}', doctorName);
     const subjectDefault = `Suite à votre devis du ${formatDate(devis.date_envoi)}`;
