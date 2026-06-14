@@ -4819,7 +4819,8 @@ Bien cordialement,`;
   // BUILD FULL BACKUP (devis + patients + relances + settings)
   // ========================================
   async function buildBackupJson() {
-    const devis = await db.devis.toArray();
+    const devisRaw = await db.devis.toArray();
+    const devis = devisRaw.map(d => { const c = Object.assign({}, d); delete c.pdfBase64; return c; }); // PDF exclus du backup (poids) ; le PDF officiel reste dans Logos
     const patients = await db.patients.toArray();
     const relances = await db.relances.toArray();
     const maintenances = await db.maintenances.toArray();
@@ -4829,7 +4830,7 @@ Bien cordialement,`;
       const k = localStorage.key(i);
       if (isSettingExportable(k)) settings[k] = localStorage.getItem(k);
     }
-    return JSON.stringify({ devis, patients, relances, maintenances, rappels_maintenance, settings, exportedAt: new Date().toISOString(), version: '3.0' }, null, 2);
+    return JSON.stringify({ devis, patients, relances, maintenances, rappels_maintenance, settings, exportedAt: new Date().toISOString(), version: '3.0' });
   }
 
   function dataUrlToFile(dataUrl, filename = 'capture.png') {
