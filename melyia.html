@@ -2007,6 +2007,7 @@ Règles :
       notes: document.getElementById('form-notes').value.trim(),
       date_envoi: dateEnvoi
     };
+    let _proposeSendDevis = null;
     if (id) {
       await db.devis.update(parseInt(id), data);
       toast('Devis modifié', 'success');
@@ -2015,13 +2016,22 @@ Règles :
       data.jeton = makeJeton();
       data.date_relance_prevue = addDays(dateEnvoi, relanceDays);
       data.created_at = new Date().toISOString();
-      await db.devis.add(data);
+      const _newDevisId = await db.devis.add(data);
+      _proposeSendDevis = { devis: Object.assign({ id: _newDevisId }, data), patient: selectedPatientForDevis };
       toast('Devis enregistré', 'success');
     }
     closeModal();
     await refreshPatientsCache();
     renderDashboard();
     if (typeof scheduleAutoBackup === 'function') scheduleAutoBackup();
+    if (_proposeSendDevis && _proposeSendDevis.patient && _proposeSendDevis.patient.email && GoogleAuth.isConnected()) {
+      setTimeout(() => {
+        toastConfirm('Devis enregistré. L\'envoyer au patient maintenant ?', {
+          confirmLabel: 'Envoyer le devis',
+          onConfirm: () => openComposeDevisModal(_proposeSendDevis.devis, _proposeSendDevis.patient)
+        });
+      }, 400);
+    }
     });
   });
 
@@ -4755,7 +4765,7 @@ Bien cordialement,`;
         </div>
         <div>
           <label class="text-[13px] font-medium text-ink-700 block mb-1.5 ml-1">Sujet</label>
-          <input id="dcompose-subject" type="text" class="input" value="Votre devis — Cabinet Dr Kebieche"/>
+          <input id="dcompose-subject" type="text" class="input" value="Votre devis — Dr Sohaïb Kebieche"/>
         </div>
         <div>
           <label class="text-[13px] font-medium text-ink-700 block mb-1.5 ml-1">Devis officiel (PDF exporté de Logos)</label>
