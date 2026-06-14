@@ -224,6 +224,11 @@
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
           Nouveau
         </button>
+        <button id="import-devis-btn" class="btn btn-secondary btn-sm ml-1" title="Importer un devis PDF exporté de Logos">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          Importer
+        </button>
+        <input type="file" id="import-devis-input" accept="application/pdf" style="display:none"/>
       </nav>
     </div>
   </header>
@@ -1653,16 +1658,16 @@ Règles :
     throw lastErr || new Error('Gemini : échec après plusieurs tentatives');
   }
 
-  async function geminiExtract(base64Image, mimeType) {
+  async function geminiExtract(base64Image, mimeType, opts = {}) {
     const apiKey = getSetting('apiKey', '');
     if (!apiKey) throw new Error('Clé API Gemini manquante. Va dans Réglages pour l\'ajouter.');
     const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
     const data = await geminiFetchWithRetry(url, {
       contents: [{ parts: [
-        { text: GEMINI_EXTRACT_PROMPT },
+        { text: opts.prompt || GEMINI_EXTRACT_PROMPT },
         { inlineData: { mimeType: mimeType, data: base64Image } }
       ]}],
-      generationConfig: { temperature: 0.2, maxOutputTokens: 512 }
+      generationConfig: { temperature: 0.2, maxOutputTokens: opts.maxOutputTokens || 512 }
     });
     if (!data.candidates || !data.candidates[0]) throw new Error('Réponse Gemini vide');
     let text = data.candidates[0].content.parts[0].text.trim();
@@ -1672,6 +1677,55 @@ Règles :
       const match = text.match(/\{[\s\S]*\}/);
       if (match) return JSON.parse(match[0]);
       throw new Error('Réponse Gemini non-JSON');
+    }
+  }
+
+  // ========================================
+  // IMPORT DEVIS (PDF Logos → extraction → pré-remplissage de la fiche)
+  // ========================================
+  const GEMINI_DEVIS_PROMPT = `Tu analyses le PDF d'un DEVIS dentaire conventionnel français (logiciel Logos). Tu extrais UNIQUEMENT le "Traitement proposé". Tu IGNORES totalement la section "Acte sans reste à charge" / "Information Alternative thérapeutique" / panier 100% Santé : l'alternative thérapeutique ne doit JAMAIS apparaître dans ta réponse.
+
+Réponds UNIQUEMENT en JSON strict, sans aucun texte autour :
+{
+  "patient": { "nom": "NOM", "prenom": "Prénom" },
+  "numeroLogos": "numéro patient si visible",
+  "soins": [ { "dent": "17", "libelle": "Couronne céramique" } ],
+  "soinsKeys": ["couronne"],
+  "total_honoraires": 750.00,
+  "total_reste_a_charge": 678.00
+}
+
+Règles :
+- "soins" = les actes du traitement proposé (numéro de dent + libellé court compréhensible par un patient).
+- "soinsKeys" = pour CHAQUE acte, une clé parmi EXACTEMENT cette liste : implant, comblement, greffe-osseuse, chirurgie-orale, dds, paro, greffe-gencive, maintenance-paro, overlay, composite, couronne, bridge, couronne-implant, amovible, carie, te, rte, detartrage, blanchiment. Correspondances : couronne céramique/CCM/CCC/zircone => couronne ; inlay/onlay/overlay => overlay ; dévitalisation/traitement endodontique/TE => te ; retraitement/RTE => rte ; couronne sur implant => couronne-implant ; bridge => bridge ; implant => implant.
+- "total_reste_a_charge" = total de la colonne "Montant non remboursé Assurance Maladie Obligatoire".
+- "total_honoraires" = total de la colonne "Honoraires".
+- Montants en nombre (point décimal), sans symbole. Si une info manque : null, ou [] pour les listes.`;
+
+  let pendingDevisPdf = null; // { name, base64 } du PDF importé, pour l'auto-joindre à l'envoi
+  async function importDevisFromPdf(file) {
+    if (!file) return;
+    if (!getSetting('apiKey', '')) { toast('Configure ta clé Gemini dans Réglages', 'warning'); navigate('settings'); return; }
+    toast('Lecture du devis en cours…', 'info');
+    try {
+      const { base64, mimeType } = await fileToBase64(file);
+      const data = await geminiExtract(base64, mimeType || 'application/pdf', { prompt: GEMINI_DEVIS_PROMPT, maxOutputTokens: 2048 });
+      pendingDevisPdf = { name: file.name || 'devis.pdf', base64 };
+      const soinsTxt = Array.isArray(data.soins)
+        ? data.soins.map(s => [s && s.libelle, (s && s.dent) ? ('(' + s.dent + ')') : ''].filter(Boolean).join(' ')).join(', ')
+        : (data.soins || '');
+      const montant = (data.total_reste_a_charge != null ? data.total_reste_a_charge : data.total_honoraires);
+      const patientName = (data.patient ? [data.patient.prenom, data.patient.nom].filter(Boolean).join(' ') : '').trim();
+      navigate('dashboard');
+      setTimeout(() => openModal(null, null, {
+        soins: soinsTxt,
+        soinsKeys: Array.isArray(data.soinsKeys) ? data.soinsKeys : [],
+        montant: (montant != null ? montant : ''),
+        patientName: patientName
+      }), 120);
+      toast('Devis lu — vérifie les infos puis enregistre', 'success');
+    } catch (e) {
+      toast('Lecture du devis échouée : ' + e.message, 'error');
     }
   }
 
@@ -1912,7 +1966,7 @@ Règles :
     document.querySelectorAll('#form-soins-keys-wrap input[type=checkbox]').forEach(c => { c.checked = set.has(c.value); });
   }
 
-  function openModal(devis = null, prefilledPatient = null) {
+  function openModal(devis = null, prefilledPatient = null, prefill = null) {
     document.getElementById('modal-form-overlay').classList.remove('hidden');
     document.body.style.overflow = 'hidden';
     selectedPatientForDevis = null;
@@ -1940,6 +1994,15 @@ Règles :
       document.getElementById('form-date').value = new Date().toISOString().slice(0, 10);
       if (prefilledPatient) {
         selectPatient(prefilledPatient);
+      }
+      if (prefill) {
+        if (prefill.montant !== undefined && prefill.montant !== '') document.getElementById('form-montant').value = prefill.montant;
+        if (prefill.soins) document.getElementById('form-soins').value = prefill.soins;
+        if (Array.isArray(prefill.soinsKeys)) setCheckedSoinsKeys(prefill.soinsKeys);
+        if (prefill.patientName && !prefilledPatient) {
+          const pick = document.getElementById('patient-picker-input');
+          if (pick) { pick.value = prefill.patientName; searchPatientsInPicker(prefill.patientName); }
+        }
       }
     }
 
@@ -1969,6 +2032,14 @@ Règles :
   }
 
   document.getElementById('open-new-btn-desktop').addEventListener('click', () => openModal());
+  (function () {
+    const ib = document.getElementById('import-devis-btn');
+    const ii = document.getElementById('import-devis-input');
+    if (ib && ii) {
+      ib.addEventListener('click', () => ii.click());
+      ii.addEventListener('change', (e) => { const f = e.target.files && e.target.files[0]; e.target.value = ''; if (f) importDevisFromPdf(f); });
+    }
+  })();
   document.getElementById('open-new-btn-mobile').addEventListener('click', () => openModal());
   document.getElementById('cancel-modal').addEventListener('click', closeModal);
   document.getElementById('modal-form-overlay').addEventListener('click', (e) => {
@@ -4788,7 +4859,7 @@ Bien cordialement,`;
         <div>
           <label class="text-[13px] font-medium text-ink-700 block mb-1.5 ml-1">Devis officiel (PDF exporté de Logos)</label>
           <input id="dcompose-pdf" type="file" accept="application/pdf" class="input !h-auto !py-2.5"/>
-          <p class="text-[11px] text-ink-400 mt-1 ml-1">Joint au mail. Exporte-le depuis Logos (PDF / Enregistrer sous).</p>
+          <p class="text-[11px] text-ink-400 mt-1 ml-1">PDF joint au mail. S'il a été importé, il est déjà attaché — sinon sélectionne-le ici.</p>
         </div>
         <div>
           <label class="text-[13px] font-medium text-ink-700 block mb-1.5 ml-1">Corps du mail</label>
@@ -4817,11 +4888,14 @@ Bien cordialement,`;
         if (file) {
           const dataB64 = await new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result).split(',')[1] || ''); r.onerror = rej; r.readAsDataURL(file); });
           attachments = [{ filename: file.name || 'devis.pdf', mimeType: 'application/pdf', dataB64 }];
+        } else if (pendingDevisPdf && pendingDevisPdf.base64) {
+          attachments = [{ filename: pendingDevisPdf.name || 'devis.pdf', mimeType: 'application/pdf', dataB64: pendingDevisPdf.base64 }];
         }
         const userEmailFresh = getSetting('googleUserEmail', '') || userEmail;
         await Gmail.sendEmail({ to, subject, body, from: doctorName && userEmailFresh ? `${doctorName} <${userEmailFresh}>` : '', attachments });
         await db.devis.update(devis.id, { devisMailSentAt: new Date().toISOString() });
-        toast(file ? 'Devis envoyé (PDF joint) ✓' : 'Devis envoyé ✓ (sans PDF)', 'success');
+        pendingDevisPdf = null;
+        toast(attachments.length ? 'Devis envoyé (PDF joint) ✓' : 'Devis envoyé ✓ (sans PDF)', 'success');
         closeDetail();
         renderDashboard();
         scheduleAutoBackup();
