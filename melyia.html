@@ -536,6 +536,7 @@
 
     <!-- VIEW: SETTINGS -->
     <section id="view-settings" class="view">
+      <style>#view-settings details:not([open]) > textarea{display:none !important}</style>
       <div class="mb-6">
         <h1 class="text-[28px] md:text-[32px] font-bold tracking-tight">Réglages</h1>
         <p class="text-[15px] text-ink-500 mt-0.5">Configure tes préférences</p>
@@ -640,7 +641,7 @@
             <button type="button" data-reset-template="relanceTemplate" class="text-[12px] text-accent hover:underline">Réinitialiser</button>
           </div>
           <div class="text-[13px] text-ink-500 mb-2">Ton bienveillant, vérifie réception. Variables : <code>{{salutation}}</code> (= « Cher M. Dupont » / « Chère Mme Dupont » / « Bonjour Jean » selon civilité connue) · <code>{{civilite}}</code> (M./Mme) · <code>{{prenom}}</code> · <code>{{nom}}</code> · <code>{{soins}}</code> · <code>{{date_envoi}}</code> · <code>{{doctor}}</code><br>💡 Mets une ligne avec juste <code>---</code> (3 tirets) avant ta signature/diplômes pour qu'ils soient centrés et séparés par un trait fin dans le mail.</div>
-          <textarea id="setting-relance-template" rows="8" class="input !text-[13px]"></textarea>
+          <details class="mt-1"><summary class="text-[13px] text-accent cursor-pointer mb-1.5" style="list-style:none">Voir / modifier le texte</summary><textarea id="setting-relance-template" rows="8" class="input !text-[13px]"></textarea></details>
         </div>
         <div class="grouped-row block">
           <div class="flex items-center justify-between mb-1">
@@ -648,7 +649,7 @@
             <button type="button" data-reset-template="relanceTemplate2" class="text-[12px] text-accent hover:underline">Réinitialiser</button>
           </div>
           <div class="text-[13px] text-ink-500 mb-2">Dernière prise de contact, ton plus net mais respectueux. Mêmes variables + séparateur signature <code>---</code>.</div>
-          <textarea id="setting-relance-template-2" rows="8" class="input !text-[13px]"></textarea>
+          <details class="mt-1"><summary class="text-[13px] text-accent cursor-pointer mb-1.5" style="list-style:none">Voir / modifier le texte</summary><textarea id="setting-relance-template-2" rows="8" class="input !text-[13px]"></textarea></details>
         </div>
         <div class="grouped-row block">
           <div class="flex items-center justify-between mb-1">
@@ -656,7 +657,7 @@
             <button type="button" data-reset-template="vulgarizePrompt" class="text-[12px] text-accent hover:underline">Réinitialiser</button>
           </div>
           <div class="text-[13px] text-ink-500 mb-2">Pour le mail explicatif initial à coller dans Logos. Variables : <code>{{soins}}</code> <code>{{doctor}}</code><br>Raccourci : <kbd>Ctrl</kbd>+<kbd>Maj</kbd>+<kbd>V</kbd> (depuis n'importe où)</div>
-          <textarea id="setting-vulgarize-prompt" rows="8" class="input !text-[13px]"></textarea>
+          <details class="mt-1"><summary class="text-[13px] text-accent cursor-pointer mb-1.5" style="list-style:none">Voir / modifier le texte</summary><textarea id="setting-vulgarize-prompt" rows="8" class="input !text-[13px]"></textarea></details>
         </div>
         <div class="grouped-row block">
           <div class="flex items-center justify-between mb-1">
@@ -664,7 +665,7 @@
             <button type="button" data-reset-template="maintenanceTemplate" class="text-[12px] text-accent hover:underline">Réinitialiser</button>
           </div>
           <div class="text-[13px] text-ink-500 mb-2">Rappel clinique différencié des relances devis. Inclut la mention « STOP » obligatoire (LCEN). Variables : <code>{{salutation}}</code> · <code>{{civilite}}</code> · <code>{{prenom}}</code> · <code>{{nom}}</code> · <code>{{type_maintenance}}</code> · <code>{{doctor}}</code> + séparateur signature <code>---</code>.</div>
-          <textarea id="setting-maintenance-template" rows="8" class="input !text-[13px]"></textarea>
+          <details class="mt-1"><summary class="text-[13px] text-accent cursor-pointer mb-1.5" style="list-style:none">Voir / modifier le texte</summary><textarea id="setting-maintenance-template" rows="8" class="input !text-[13px]"></textarea></details>
         </div>
       </div>
 
@@ -753,7 +754,7 @@
             <button type="button" data-reset-template="googleReviewTemplate" class="text-[12px] text-accent hover:underline">Réinitialiser</button>
           </div>
           <div class="text-[13px] text-ink-500 mb-2">Ton chaleureux, ouvre la porte au feedback direct avant le CTA Google. Marche aussi bien pour un patient suite à un soin que pour un patient sans devis. Variables : <code>{{salutation}}</code> · <code>{{prenom}}</code> · <code>{{nom}}</code> · <code>{{lien_google}}</code> · <code>{{doctor}}</code> + séparateur signature <code>---</code>.</div>
-          <textarea id="setting-google-review-template" rows="10" class="input !text-[13px]"></textarea>
+          <details class="mt-1"><summary class="text-[13px] text-accent cursor-pointer mb-1.5" style="list-style:none">Voir / modifier le texte</summary><textarea id="setting-google-review-template" rows="10" class="input !text-[13px]"></textarea></details>
         </div>
         <div class="grouped-row">
           <div class="flex-1">
