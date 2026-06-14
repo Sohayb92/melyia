@@ -908,7 +908,7 @@
 
           <div class="grid grid-cols-2 gap-3 pt-2 border-t border-ink-100">
             <div>
-              <label class="text-[13px] font-medium text-ink-700 block mb-1.5 ml-1">Montant</label>
+              <label class="text-[13px] font-medium text-ink-700 block mb-1.5 ml-1">Montant total du devis</label>
               <input id="form-montant" type="number" step="0.01" inputmode="decimal" required class="input tabular-nums" placeholder="€"/>
             </div>
             <div>
@@ -1888,7 +1888,7 @@ Règles :
       }
       pendingDevisPdf = { name: file.name || 'devis.pdf', base64 };
       const soinsTxt = (data.actes || []).map(s => [s.libelle, s.dent ? ('(' + s.dent + ')') : ''].filter(Boolean).join(' ')).filter(Boolean).join(', ');
-      const montant = (data.total_reste_a_charge != null ? data.total_reste_a_charge : data.total_honoraires);
+      const montant = (data.total_honoraires != null ? data.total_honoraires : data.total_reste_a_charge); // pas de tiers payant : le patient règle le TOTAL
       const patientName = [data.patient && data.patient.prenom, data.patient && data.patient.nom].filter(Boolean).join(' ').trim();
       navigate('dashboard');
       setTimeout(() => openModal(null, null, {
