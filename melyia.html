@@ -1780,18 +1780,23 @@ Règles :
     toast('Lecture du devis en cours…', 'info');
     try {
       const { base64, mimeType } = await fileToBase64(file);
-      let data = null;
+      let data = null, pdfDiag = '';
       // 1) Voie principale : lecture déterministe de la couche texte (exacte) via Electron.
       if (window.melyiaElectron && window.melyiaElectron.extractPdfText) {
         try {
           const r = await window.melyiaElectron.extractPdfText(base64);
-          if (r && r.ok && r.text && /Traitement proposé/i.test(r.text)) data = parseDevisFromText(r.text);
-        } catch (e) { /* repli IA ci-dessous */ }
-      }
+          if (r && r.ok && r.text) {
+            if (/Traitement proposé/i.test(r.text)) { data = parseDevisFromText(r.text); if (!data.actes.length) pdfDiag = 'tableau « Traitement proposé » non reconnu'; }
+            else pdfDiag = '« Traitement proposé » introuvable dans le texte du PDF';
+          } else { pdfDiag = (r && r.error) ? ('pdf-parse : ' + r.error) : 'lecture PDF vide'; }
+        } catch (e) { pdfDiag = 'IPC : ' + e.message; }
+      } else { pdfDiag = 'version sans lecture PDF — redémarre Mélyia pour appliquer la mise à jour'; }
       // 2) Secours : IA (PDF sans couche texte, ou hors Electron).
       if (!data || !data.actes || !data.actes.length) {
-        if (!getSetting('apiKey', '')) { toast('PDF non lisible (pas de couche texte) et pas de clé Gemini', 'warning'); return; }
-        const ai = await geminiExtract(base64, mimeType || 'application/pdf', { prompt: GEMINI_DEVIS_PROMPT, maxOutputTokens: 4096 });
+        if (!getSetting('apiKey', '')) { toast('Lecture PDF impossible (' + pdfDiag + ')', 'warning'); return; }
+        console.warn('[Melyia] import devis — repli IA, raison :', pdfDiag);
+        toast('Lecture exacte indispo (' + pdfDiag + ') — tentative IA…', 'info');
+        const ai = await geminiExtract(base64, mimeType || 'application/pdf', { prompt: GEMINI_DEVIS_PROMPT, maxOutputTokens: 8192 });
         const aiActes = Array.isArray(ai.soins) ? ai.soins.map(s => ({ dent: s && s.dent, libelle: s && s.libelle })) : [];
         data = {
           patient: ai.patient || { nom: '', prenom: '' },
