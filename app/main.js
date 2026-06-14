@@ -5,6 +5,11 @@ const http = require('http');
 const crypto = require('crypto');
 const { autoUpdater } = require('electron-updater');
 
+// Fix Windows : champs de formulaire parfois "grisés"/non éditables au clavier tant qu'on
+// n'a pas changé de fenêtre (bug de repaint/focus GPU Chromium). Désactiver l'accélération
+// matérielle règle ce cas (app de formulaires, aucun besoin GPU). Doit être appelé avant ready.
+app.disableHardwareAcceleration();
+
 // Single instance lock
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {
@@ -143,6 +148,7 @@ function createWindow() {
   mainWindow.once('ready-to-show', () => {
     if (!startHidden) {
       mainWindow.show();
+      mainWindow.webContents.focus(); // garantit que le clavier cible bien la page (champs éditables)
     }
   });
 
@@ -246,6 +252,7 @@ function showWindow() {
   if (mainWindow.isMinimized()) mainWindow.restore();
   mainWindow.show();
   mainWindow.focus();
+  mainWindow.webContents.focus(); // bug Windows : sans ça, les champs restent non éditables au clavier
 }
 
 async function triggerAutoCapture(type = 'patient') {
