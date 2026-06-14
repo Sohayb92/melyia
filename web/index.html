@@ -2100,6 +2100,7 @@ Règles :
       <div class="space-y-2 mb-2">
         ${!isClosed ? `
           ${pInfo.email && GoogleAuth.isConnected() ? `<button class="action-btn btn btn-primary w-full" data-action="send-mail-relance"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg> Envoyer la relance par mail</button>` : ''}
+          ${pInfo.email && GoogleAuth.isConnected() ? `<button class="action-btn btn btn-primary w-full" data-action="envoyer-devis"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg> Envoyer le devis au patient</button>` : ''}
           <button class="action-btn btn btn-secondary w-full" data-action="vulgarize-logos"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg> Générer le mail d'explication (Logos)</button>
           <button class="action-btn btn btn-secondary w-full" data-action="copier-lien-patient"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg> Copier le lien page patient</button>
           <div class="grid grid-cols-2 gap-2">
@@ -2133,6 +2134,11 @@ Règles :
         const action = btn.dataset.action;
         if (action === 'send-mail-relance') {
           openComposeRelanceModal(devis, pInfo);
+          return;
+        }
+        if (action === 'envoyer-devis') {
+          closeDetail();
+          openComposeDevisModal(devis, pInfo);
           return;
         }
         if (action === 'vulgarize-logos') {
@@ -3749,6 +3755,18 @@ Bien cordialement,`;
   // Legacy unified template (for backward compatibility — uses template 1 if no specific value set)
   const DEFAULT_RELANCE_TEMPLATE = DEFAULT_RELANCE_TEMPLATE_1;
 
+  // v2.6.5 — Mail initial du devis envoyé par Mélyia (écrin premium + PDF officiel en PJ).
+  const DEFAULT_DEVIS_TEMPLATE = `{{salutation}},
+
+Suite à notre consultation, je vous adresse votre devis (en pièce jointe), accompagné d'une page personnelle qui vous explique chaque soin proposé, simplement :
+[Voir mon devis expliqué]({{lien_comprendre}})
+
+Vous y retrouverez le détail de votre plan de traitement, à relire à tête reposée. Le devis ci-joint fait référence.
+
+Pour toute question, répondez simplement à ce mail ou appelez le cabinet au 01 42 42 94 69.
+
+Bien cordialement,`;
+
   // v2.5.6 — Template mail d'avis Google (technique "évacuation interne")
   const DEFAULT_GOOGLE_REVIEW_TEMPLATE = `{{salutation}},
 
@@ -4316,22 +4334,37 @@ Bien cordialement,`;
       }
       return this._emailShell(inner, preheader);
     },
-    async sendEmail({ to, subject, body, bcc = '', from = '' }) {
+    async sendEmail({ to, subject, body, bcc = '', from = '', attachments = [] }) {
       if (!to) throw new Error('Destinataire manquant');
       const token = await GoogleAuth.getAccessToken();
       const htmlBody = this._textToHtml(body);
-      const lines = [];
-      if (from) lines.push(`From: ${from}`);
-      lines.push(`To: ${to}`);
-      if (bcc) lines.push(`Bcc: ${bcc}`);
+      const headers = [];
+      if (from) headers.push(`From: ${from}`);
+      headers.push(`To: ${to}`);
+      if (bcc) headers.push(`Bcc: ${bcc}`);
       const subjectB64 = btoa(unescape(encodeURIComponent(subject || '')));
-      lines.push(`Subject: =?UTF-8?B?${subjectB64}?=`);
-      lines.push('MIME-Version: 1.0');
-      lines.push('Content-Type: text/html; charset=utf-8');
-      lines.push('Content-Transfer-Encoding: base64');
-      lines.push('');
-      const bodyB64 = btoa(unescape(encodeURIComponent(htmlBody))).replace(/(.{76})/g, '$1\r\n');
-      const messageRaw = lines.join('\r\n') + '\r\n' + bodyB64;
+      headers.push(`Subject: =?UTF-8?B?${subjectB64}?=`);
+      headers.push('MIME-Version: 1.0');
+      const htmlB64 = btoa(unescape(encodeURIComponent(htmlBody))).replace(/(.{76})/g, '$1\r\n');
+      let messageRaw;
+      if (attachments && attachments.length) {
+        // multipart/mixed : corps HTML + pièces jointes (ex. PDF du devis officiel)
+        const boundary = 'melyia_b_' + Date.now().toString(36) + Math.floor(Math.random() * 1e9).toString(36);
+        headers.push(`Content-Type: multipart/mixed; boundary="${boundary}"`);
+        let m = headers.join('\r\n') + '\r\n\r\n';
+        m += `--${boundary}\r\nContent-Type: text/html; charset=utf-8\r\nContent-Transfer-Encoding: base64\r\n\r\n${htmlB64}\r\n`;
+        for (const a of attachments) {
+          const fb64 = String(a.dataB64 || '').replace(/\s+/g, '').replace(/(.{76})/g, '$1\r\n');
+          const fname = String(a.filename || 'document.pdf').replace(/[\r\n"]/g, '');
+          m += `--${boundary}\r\nContent-Type: ${a.mimeType || 'application/octet-stream'}; name="${fname}"\r\nContent-Transfer-Encoding: base64\r\nContent-Disposition: attachment; filename="${fname}"\r\n\r\n${fb64}\r\n`;
+        }
+        m += `--${boundary}--`;
+        messageRaw = m;
+      } else {
+        headers.push('Content-Type: text/html; charset=utf-8');
+        headers.push('Content-Transfer-Encoding: base64');
+        messageRaw = headers.join('\r\n') + '\r\n\r\n' + htmlB64;
+      }
       const encodedMessage = btoa(unescape(encodeURIComponent(messageRaw))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
       const res = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
         method: 'POST',
@@ -4690,6 +4723,84 @@ Bien cordialement,`;
   // ========================================
   // COMPOSE RELANCE MAIL (via Gmail)
   // ========================================
+  async function openComposeDevisModal(devis, pInfo) {
+    if (!pInfo || !pInfo.email) { toast('Pas d\'email pour ce patient', 'warning'); return; }
+    if (pInfo.noContact === true) { toast(patientFullName(pInfo) + ' a demandé à ne plus être sollicité (STOP).', 'warning'); return; }
+    if (!devis.jeton) { devis.jeton = makeJeton(); try { await db.devis.update(devis.id, { jeton: devis.jeton }); } catch (e) {} }
+    const mdKeys = await patientSoinsKeys(pInfo && pInfo.id, devis);
+    const doctorName = (getSetting('doctorName', '') || '').trim() || 'Votre dentiste';
+    const filled = getSetting('devisTemplate', DEFAULT_DEVIS_TEMPLATE)
+      .replaceAll('{{salutation}}', buildSalutation(pInfo))
+      .replaceAll('{{civilite}}', titreOf(pInfo))
+      .replaceAll('{{titre}}', titreOf(pInfo))
+      .replaceAll('{{prenom}}', pInfo.prenom || '')
+      .replaceAll('{{nom}}', pInfo.nom || '')
+      .replaceAll('{{lien_comprendre}}', buildMonDevisUrl(devis.jeton, pInfo, mdKeys, UTM_DEVIS))
+      .replaceAll('{{doctor}}', doctorName);
+    const userEmail = getSetting('googleUserEmail', '');
+    const html = `
+      <div class="flex items-center justify-between mb-4">
+        <button id="dcompose-cancel" class="text-[16px] text-ink-500 font-normal">Annuler</button>
+        <div class="text-[17px] font-semibold">Envoyer le devis</div>
+        <button id="dcompose-send" class="text-[16px] text-accent font-semibold">Envoyer</button>
+      </div>
+      <div class="space-y-3">
+        <div>
+          <label class="text-[13px] font-medium text-ink-700 block mb-1.5 ml-1">Destinataire</label>
+          <input id="dcompose-to" type="email" class="input" value="${(pInfo.email || '').replace(/"/g, '&quot;')}"/>
+        </div>
+        <div>
+          <label class="text-[13px] font-medium text-ink-700 block mb-1.5 ml-1">Sujet</label>
+          <input id="dcompose-subject" type="text" class="input" value="Votre devis — Cabinet Dr Kebieche"/>
+        </div>
+        <div>
+          <label class="text-[13px] font-medium text-ink-700 block mb-1.5 ml-1">Devis officiel (PDF exporté de Logos)</label>
+          <input id="dcompose-pdf" type="file" accept="application/pdf" class="input !h-auto !py-2.5"/>
+          <p class="text-[11px] text-ink-400 mt-1 ml-1">Joint au mail. Exporte-le depuis Logos (PDF / Enregistrer sous).</p>
+        </div>
+        <div>
+          <label class="text-[13px] font-medium text-ink-700 block mb-1.5 ml-1">Corps du mail</label>
+          <textarea id="dcompose-body" rows="11" class="input !text-[14px]" style="font-family: inherit">${filled.replace(/</g, '&lt;')}</textarea>
+        </div>
+        <div class="text-[12px] text-ink-500 px-1">Envoi premium depuis ton Gmail (${userEmail || '?'}) : écrin + lien page patient + PDF en pièce jointe.</div>
+      </div>
+    `;
+    document.getElementById('modal-detail-content').innerHTML = html;
+    document.getElementById('modal-detail-overlay').classList.remove('hidden');
+    document.body.style.overflow = 'hidden';
+    document.getElementById('dcompose-cancel').addEventListener('click', closeDetail);
+    document.getElementById('modal-detail-overlay').addEventListener('click', (e) => { if (e.target.id === 'modal-detail-overlay') closeDetail(); });
+    document.getElementById('dcompose-send').addEventListener('click', async () => {
+      await withBusyGuard('send-devis', async () => {
+      const to = document.getElementById('dcompose-to').value.trim();
+      const subject = document.getElementById('dcompose-subject').value.trim();
+      const body = document.getElementById('dcompose-body').value;
+      if (!to) { toast('Email destinataire manquant', 'warning'); return; }
+      const fileInput = document.getElementById('dcompose-pdf');
+      const file = fileInput.files && fileInput.files[0];
+      const sendBtn = document.getElementById('dcompose-send');
+      sendBtn.disabled = true; const orig = sendBtn.textContent; sendBtn.textContent = 'Envoi…';
+      try {
+        let attachments = [];
+        if (file) {
+          const dataB64 = await new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result).split(',')[1] || ''); r.onerror = rej; r.readAsDataURL(file); });
+          attachments = [{ filename: file.name || 'devis.pdf', mimeType: 'application/pdf', dataB64 }];
+        }
+        const userEmailFresh = getSetting('googleUserEmail', '') || userEmail;
+        await Gmail.sendEmail({ to, subject, body, from: doctorName && userEmailFresh ? `${doctorName} <${userEmailFresh}>` : '', attachments });
+        await db.devis.update(devis.id, { devisMailSentAt: new Date().toISOString() });
+        toast(file ? 'Devis envoyé (PDF joint) ✓' : 'Devis envoyé ✓ (sans PDF)', 'success');
+        closeDetail();
+        renderDashboard();
+        scheduleAutoBackup();
+      } catch (e) {
+        toast('Erreur envoi : ' + e.message, 'error');
+        sendBtn.disabled = false; sendBtn.textContent = orig;
+      }
+      });
+    });
+  }
+
   async function openComposeRelanceModal(devis, pInfo) {
     // Compliance LCEN : bloquer si le patient a coché "Ne plus solliciter"
     if (pInfo && pInfo.noContact === true) {
