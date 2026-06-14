@@ -24,6 +24,9 @@ contextBridge.exposeInMainWorld('melyiaElectron', {
   showWindow: () => ipcRenderer.invoke('show-window'),
   hideToTray: () => ipcRenderer.invoke('hide-to-tray'),
 
+  // Extraction du texte d'un PDF (devis Logos) côté main (pdf-parse)
+  extractPdfText: (base64) => ipcRenderer.invoke('extract-pdf-text', base64),
+
   getAppInfo: () => ipcRenderer.invoke('app-info'),
 
   // Google OAuth (PKCE flow via loopback http server)

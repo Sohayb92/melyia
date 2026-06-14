@@ -1707,27 +1707,113 @@ Règles :
 - Montants en nombre (point décimal), sans symbole. Si une info manque : null, ou [] pour les listes.`;
 
   let pendingDevisPdf = null; // { name, base64 } du PDF importé, pour l'auto-joindre à l'envoi
+
+  function _devisNum(s) { return parseFloat(String(s).replace(/[\s  ]/g, '').replace(',', '.')); }
+
+  // Mappe un acte (libellé) vers une des 19 clés de soins (au mieux ; le Dr corrige le tag).
+  function acteToSoinKey(libelle) {
+    const l = (libelle || '').toLowerCase();
+    if (/dépose|depose|rétroalvéolaire|retroalveolaire|radiograph/.test(l)) return null; // retrait / radio
+    if (/inlay\s*core|faux moignon|tenon/.test(l)) return null; // reconstitution, pas un soin patient
+    if (/overlay|inlay|onlay/.test(l)) return 'overlay';
+    if (/implant/.test(l)) return /couronne/.test(l) ? 'couronne-implant' : 'implant';
+    if (/retraitement|désobturation|desobturation|reprise.*endodon/.test(l)) return 'rte';
+    if (/dévitalisation|devitalisation|traitement endodontique|mise en forme et obturation|obturation canal/.test(l)) return 'te';
+    if (/bridge/.test(l)) return 'bridge';
+    if (/comblement/.test(l)) return 'comblement';
+    if (/greffe.*oss/.test(l)) return 'greffe-osseuse';
+    if (/greffe.*genciv|récession|recession|tunnel/.test(l)) return 'greffe-gencive';
+    if (/maintenance/.test(l)) return 'maintenance-paro';
+    if (/parodont|surfaçage|surfacage|débridement|debridement|assainissement/.test(l)) return 'paro';
+    if (/sagesse/.test(l)) return 'dds';
+    if (/couronne/.test(l)) return 'couronne';
+    if (/extraction|avulsion/.test(l)) return 'chirurgie-orale';
+    if (/composite/.test(l)) return 'composite';
+    if (/amovible|stellite|adjointe/.test(l)) return 'amovible';
+    if (/blanchiment|éclaircissement/.test(l)) return 'blanchiment';
+    if (/détartrage|detartrage/.test(l)) return 'detartrage';
+    if (/carie/.test(l)) return 'carie';
+    return null; // dépose, inlay core, rétroalvéolaire… = étapes techniques, pas un soin patient
+  }
+
+  // Parseur déterministe d'un devis conventionnel Logos (couche texte exacte).
+  // N'extrait QUE le "Traitement proposé" — l'alternative RAC0 est exclue.
+  function parseDevisFromText(text) {
+    const t = String(text || '').replace(/\r/g, '');
+    let nom = '', prenom = '';
+    const mPat = t.match(/Nom et prénom\s*:\s*([^\n]+)/);
+    if (mPat) {
+      mPat[1].trim().split(/\s+/).forEach(w => {
+        if (w.length > 1 && w === w.toUpperCase()) nom = (nom ? nom + ' ' : '') + w;
+        else prenom = (prenom ? prenom + ' ' : '') + w;
+      });
+    }
+    const mNum = t.match(/Devis\s+(\d+)-/);
+    const numeroLogos = mNum ? mNum[1] : '';
+    const start = t.indexOf('Traitement proposé');
+    const altIdx = t.search(/Information Alternative|Actes?\s+sans reste à charge/);
+    const section = t.slice(start >= 0 ? start : 0, altIdx >= 0 ? altIdx : undefined);
+    const actes = [];
+    const lineRe = /\n\s*\d+\s+(\d{1,2})\s+([A-Z]{4}\d{3})\s+([^\n]+)/g;
+    let m;
+    while ((m = lineRe.exec(section))) {
+      const dent = m[1], code = m[2];
+      let rest = m[3].trim();
+      const numIdx = rest.search(/\s(?:NR|\d[\d\s  ]*,\d{2})\b/);
+      let libelle = numIdx >= 0 ? rest.slice(0, numIdx).trim() : rest;
+      libelle = libelle.replace(/\s+\d+(?:\s+\d+)?\s+Aucun\s*$/i, '').replace(/\s+\d+(?:\s+\d+)?$/, '').trim();
+      actes.push({ dent, code, libelle });
+    }
+    let total_honoraires = null, total_reste = null;
+    const mTot = section.match(/TOTAL[^\n]*envisag[^\n]*/i);
+    if (mTot) {
+      const nums = mTot[0].match(/\d[\d\s  ]*,\d{2}/g) || [];
+      if (nums.length) { total_honoraires = _devisNum(nums[0]); total_reste = _devisNum(nums[nums.length - 1]); }
+    }
+    const soinsKeys = [...new Set(actes.map(a => acteToSoinKey(a.libelle)).filter(Boolean))];
+    if (soinsKeys.includes('rte')) { const i = soinsKeys.indexOf('te'); if (i >= 0) soinsKeys.splice(i, 1); } // un retraitement couvre déjà l'endo
+    return { patient: { nom, prenom }, numeroLogos, actes, soinsKeys, total_honoraires, total_reste_a_charge: total_reste };
+  }
+
   async function importDevisFromPdf(file) {
     if (!file) return;
-    if (!getSetting('apiKey', '')) { toast('Configure ta clé Gemini dans Réglages', 'warning'); navigate('settings'); return; }
     toast('Lecture du devis en cours…', 'info');
     try {
       const { base64, mimeType } = await fileToBase64(file);
-      const data = await geminiExtract(base64, mimeType || 'application/pdf', { prompt: GEMINI_DEVIS_PROMPT, maxOutputTokens: 2048 });
+      let data = null;
+      // 1) Voie principale : lecture déterministe de la couche texte (exacte) via Electron.
+      if (window.melyiaElectron && window.melyiaElectron.extractPdfText) {
+        try {
+          const r = await window.melyiaElectron.extractPdfText(base64);
+          if (r && r.ok && r.text && /Traitement proposé/i.test(r.text)) data = parseDevisFromText(r.text);
+        } catch (e) { /* repli IA ci-dessous */ }
+      }
+      // 2) Secours : IA (PDF sans couche texte, ou hors Electron).
+      if (!data || !data.actes || !data.actes.length) {
+        if (!getSetting('apiKey', '')) { toast('PDF non lisible (pas de couche texte) et pas de clé Gemini', 'warning'); return; }
+        const ai = await geminiExtract(base64, mimeType || 'application/pdf', { prompt: GEMINI_DEVIS_PROMPT, maxOutputTokens: 4096 });
+        const aiActes = Array.isArray(ai.soins) ? ai.soins.map(s => ({ dent: s && s.dent, libelle: s && s.libelle })) : [];
+        data = {
+          patient: ai.patient || { nom: '', prenom: '' },
+          numeroLogos: ai.numeroLogos || '',
+          actes: aiActes,
+          soinsKeys: Array.isArray(ai.soinsKeys) ? ai.soinsKeys : [],
+          total_honoraires: ai.total_honoraires,
+          total_reste_a_charge: ai.total_reste_a_charge
+        };
+      }
       pendingDevisPdf = { name: file.name || 'devis.pdf', base64 };
-      const soinsTxt = Array.isArray(data.soins)
-        ? data.soins.map(s => [s && s.libelle, (s && s.dent) ? ('(' + s.dent + ')') : ''].filter(Boolean).join(' ')).join(', ')
-        : (data.soins || '');
+      const soinsTxt = (data.actes || []).map(s => [s.libelle, s.dent ? ('(' + s.dent + ')') : ''].filter(Boolean).join(' ')).filter(Boolean).join(', ');
       const montant = (data.total_reste_a_charge != null ? data.total_reste_a_charge : data.total_honoraires);
-      const patientName = (data.patient ? [data.patient.prenom, data.patient.nom].filter(Boolean).join(' ') : '').trim();
+      const patientName = [data.patient && data.patient.prenom, data.patient && data.patient.nom].filter(Boolean).join(' ').trim();
       navigate('dashboard');
       setTimeout(() => openModal(null, null, {
         soins: soinsTxt,
-        soinsKeys: Array.isArray(data.soinsKeys) ? data.soinsKeys : [],
+        soinsKeys: data.soinsKeys || [],
         montant: (montant != null ? montant : ''),
         patientName: patientName
       }), 120);
-      toast('Devis lu — vérifie les infos puis enregistre', 'success');
+      toast('Devis lu — vérifie (surtout les tags soins) puis enregistre', 'success');
     } catch (e) {
       toast('Lecture du devis échouée : ' + e.message, 'error');
     }

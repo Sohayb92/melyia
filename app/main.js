@@ -307,6 +307,19 @@ ipcMain.handle('trigger-capture', (e, type) => triggerAutoCapture(type));
 ipcMain.handle('show-window', () => showWindow());
 ipcMain.handle('hide-to-tray', () => { if (mainWindow) mainWindow.hide(); });
 
+// Extraction du texte d'un PDF (devis Logos) — lib pure JS, requise à la demande.
+// On require le fichier lib directement pour éviter le code debug de l'index pdf-parse.
+ipcMain.handle('extract-pdf-text', async (e, base64) => {
+  try {
+    const pdfParse = require('pdf-parse/lib/pdf-parse.js');
+    const buf = Buffer.from(String(base64 || ''), 'base64');
+    const data = await pdfParse(buf);
+    return { ok: true, text: (data && data.text) || '' };
+  } catch (err) {
+    return { ok: false, error: String((err && err.message) || err) };
+  }
+});
+
 // Auto-launch Windows
 ipcMain.handle('get-auto-launch', () => {
   return app.getLoginItemSettings().openAtLogin;

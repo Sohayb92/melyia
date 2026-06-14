@@ -1,6 +1,6 @@
 {
   "name": "melyia",
-  "version": "2.6.9",
+  "version": "2.6.10",
   "description": "Suivi de devis dentaires - app native Windows",
   "main": "app/main.js",
   "private": true,
@@ -16,7 +16,8 @@
     "puppeteer": "^25.1.0"
   },
   "dependencies": {
-    "electron-updater": "^6.8.3"
+    "electron-updater": "^6.8.3",
+    "pdf-parse": "^1.1.4"
   },
   "build": {
     "appId": "com.melyia.app",
