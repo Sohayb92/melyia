@@ -575,6 +575,16 @@
       </div>
       <p class="text-[12px] text-ink-500 mb-6 px-1">Sans clé : la capture reste invisible, tu remplis tout à la main. Avec clé : colle la fiche Logos dans la modal Nouveau devis, l'IA pré-remplit en 3 sec.</p>
 
+      <div class="mb-2 px-1 text-[12px] uppercase tracking-wider text-ink-500 font-semibold">Page patient premium</div>
+      <div class="grouped-list mb-2">
+        <div class="grouped-row block">
+          <div class="text-[15px] font-medium mb-1">Clé de publication</div>
+          <div class="text-[13px] text-ink-500 mb-2">Sécurise la publication du récit sur drkebieche.fr. Colle ici la clé fournie (la même que celle posée sur Cloudflare).</div>
+          <input id="setting-publish-key" type="password" placeholder="clé de publication" class="input !text-[14px] font-mono"/>
+        </div>
+      </div>
+      <p class="text-[12px] text-ink-500 mb-6 px-1">Sans cette clé (une fois la sécurité activée côté serveur), la publication de la page patient sera refusée.</p>
+
       <div class="mb-2 px-1 text-[12px] uppercase tracking-wider text-ink-500 font-semibold">Compte Google</div>
       <div class="grouped-list mb-2">
         <div id="google-not-connected" class="grouped-row block">
@@ -4231,6 +4241,7 @@ Bien cordialement,`;
     document.getElementById('setting-doctor-name').value = getSetting('doctorName', '');
     document.getElementById('setting-cabinet-email').value = getSetting('cabinetEmail', '');
     document.getElementById('setting-api-key').value = getSetting('apiKey', '');
+    document.getElementById('setting-publish-key').value = getSetting('publishKey', '');
     document.getElementById('setting-google-client-id').value = getSetting('googleClientId', '');
     document.getElementById('setting-google-client-secret').value = getSetting('googleClientSecret', '');
     document.getElementById('setting-relance-template').value = getSetting('relanceTemplate', DEFAULT_RELANCE_TEMPLATE_1);
@@ -4277,6 +4288,7 @@ Bien cordialement,`;
     setSetting('doctorName', document.getElementById('setting-doctor-name').value.trim());
     setSetting('cabinetEmail', document.getElementById('setting-cabinet-email').value.trim());
     setSetting('apiKey', document.getElementById('setting-api-key').value.trim());
+    setSetting('publishKey', document.getElementById('setting-publish-key').value.trim());
     setSetting('googleClientId', document.getElementById('setting-google-client-id').value.trim());
     setSetting('googleClientSecret', document.getElementById('setting-google-client-secret').value.trim());
     setSetting('relanceTemplate', document.getElementById('setting-relance-template').value);
