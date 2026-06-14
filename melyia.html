@@ -4603,11 +4603,13 @@ Bien cordialement,`;
       const doctor = (getSetting('doctorName', '') || '').trim() || 'Votre dentiste';
       const prompt = promptTemplate.split('{{soins}}').join(keywords).split('{{doctor}}').join(doctor);
       const result = await geminiGenerateText(prompt, { temperature: 0.7, maxOutputTokens: 4096 });
-      let patientName = '';
+      let patientName = '', patObj = null;
       if (currentVulgarizeDevis && currentVulgarizeDevis.patient_id) {
-        try { const pt = await db.patients.get(currentVulgarizeDevis.patient_id); if (pt) patientName = patientFullName(pt); } catch (e) {}
+        try { patObj = await db.patients.get(currentVulgarizeDevis.patient_id); if (patObj) patientName = patientFullName(patObj); } catch (e) {}
       }
-      const corps = result.replace(/\n+\s*Bien cordialement[\s\S]*$/i, '').replace(/\s+$/, '');
+      let corps = result.replace(/\n+\s*Bien cordialement[\s\S]*$/i, '').replace(/\s+$/, '');
+      // Salutation : forcer celle du dossier patient (civilité + nom) si on l'a.
+      if (patObj) corps = corps.replace(/^\s*(?:Cher|Chère|Bonjour|Madame|Monsieur)[^\n]*,\s*/i, buildSalutation(patObj) + ',\n\n');
       document.getElementById('vulgarize-output').value = corps + buildLogosFooter(currentVulgarizeDevis, patientName);
       document.getElementById('vulgarize-result-block').classList.remove('hidden');
       status.textContent = '✓ Généré';
