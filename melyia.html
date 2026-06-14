@@ -244,24 +244,7 @@
     <section id="view-dashboard" class="view active">
       <span id="greeting" class="hidden"></span><span id="today-date" class="hidden"></span>
 
-      <!-- Vue "Aujourd'hui" : bandeau prioritaire -->
-      <div class="mb-5 mt-5">
-        <div class="text-[11px] uppercase tracking-wider text-ink-500 font-semibold mb-2 ml-1" id="today-label">Aujourd'hui</div>
-        <div class="grid grid-cols-3 gap-3">
-          <div class="bg-white border border-ink-200 rounded-xl p-4">
-            <div class="text-[20px] font-semibold tabular-nums leading-none text-ink-900" id="today-patients">0</div>
-            <div class="text-[12px] text-ink-500 mt-1.5">patient<span id="today-patients-s"></span></div>
-          </div>
-          <div class="bg-white border border-ink-200 rounded-xl p-4">
-            <div class="text-[20px] font-semibold tabular-nums leading-none text-ink-900" id="today-devis">0</div>
-            <div class="text-[12px] text-ink-500 mt-1.5">devis envoyé<span id="today-devis-s"></span></div>
-          </div>
-          <div class="bg-white border border-ink-200 rounded-xl p-4">
-            <div class="text-[16px] font-semibold tabular-nums leading-none text-ink-900" id="today-amount">0 €</div>
-            <div class="text-[12px] text-ink-500 mt-1.5">CA envoyé</div>
-          </div>
-        </div>
-      </div>
+      <!-- (rangée "Aujourd'hui" déplacée sous les KPIs pipeline — voir plus bas) -->
 
       <!-- Relances dues card (priority) -->
       <div id="relances-section" class="hidden mb-4 animate-fade-up" style="animation-delay: 0ms">
@@ -316,6 +299,25 @@
           <div class="text-[12px] text-accent font-medium">Conversion globale</div>
           <div class="text-[22px] font-semibold tabular-nums leading-none mt-2.5 text-ink-900" id="stat-rate">—</div>
           <div class="text-[12px] text-ink-500 mt-2" id="stat-rate-detail">—</div>
+        </div>
+      </div>
+
+      <!-- Vue "Aujourd'hui" : snapshot secondaire (sous les KPIs pipeline) -->
+      <div class="mb-6">
+        <div class="text-[11px] uppercase tracking-wider text-ink-500 font-semibold mb-2 ml-1" id="today-label">Aujourd'hui</div>
+        <div class="grid grid-cols-3 gap-3">
+          <div class="bg-white border border-ink-200 rounded-xl p-4">
+            <div class="text-[20px] font-semibold tabular-nums leading-none text-ink-900" id="today-patients">0</div>
+            <div class="text-[12px] text-ink-500 mt-1.5">patient<span id="today-patients-s"></span></div>
+          </div>
+          <div class="bg-white border border-ink-200 rounded-xl p-4">
+            <div class="text-[20px] font-semibold tabular-nums leading-none text-ink-900" id="today-devis">0</div>
+            <div class="text-[12px] text-ink-500 mt-1.5">devis envoyé<span id="today-devis-s"></span></div>
+          </div>
+          <div class="bg-white border border-ink-200 rounded-xl p-4">
+            <div class="text-[16px] font-semibold tabular-nums leading-none text-ink-900" id="today-amount">0 €</div>
+            <div class="text-[12px] text-ink-500 mt-1.5">CA envoyé</div>
+          </div>
         </div>
       </div>
 
