@@ -1552,6 +1552,22 @@
     return true;
   }
 
+  // Garde-fou : aucun terme banni / alternative / montant ne doit fuiter dans le récit patient.
+  // Scanne UNIQUEMENT le texte narratif (objectif/phases/conseils/clôture), pas le champ `rac`.
+  function recitBannedHit(recit) {
+    const parts = [];
+    if (recit && recit.objectif) parts.push(recit.objectif);
+    ((recit && recit.phases) || []).forEach(p => ((p && p.paragraphes) || []).forEach(x => parts.push(x)));
+    ((recit && recit.conseils) || []).forEach(x => parts.push(x));
+    if (recit && recit.cloture) parts.push(recit.cloture);
+    const joined = parts.join('  \n  ');
+    const low = joined.toLowerCase();
+    const banned = ['dépose', 'depose', 'inlay core', 'faux moignon', 'désobturation', 'desobturation', 'rétroalvéolaire', 'retroalveolaire', 'mise en forme', 'sans reste à charge', 'sans reste a charge', 'alternative', '100% santé', '100% sante', '100 % santé', 'rac0', 'mutuelle', 'remboursement', 'reste à charge'];
+    for (const b of banned) { if (low.indexOf(b) !== -1) return b; }
+    if (/\d[\d.,\s]*(?:€|euros?\b)/i.test(joined)) return 'un montant (€)';
+    return null;
+  }
+
   // Agrège les clés de soins de TOUS les devis non-refusés d'un patient (multi-devis
   // → une seule page patient). Inclut toujours les clés du devis courant.
   async function patientSoinsKeys(patientId, currentDevis) {
@@ -5232,6 +5248,8 @@ Bien cordialement,`;
         recit.jeton = devis.jeton;
         recit.salutation = recit.salutation || buildSalutation(pInfo);
         recit.nom = recit.nom || patientFullName(pInfo);
+        const _bad = recitBannedHit(recit);
+        if (_bad) { setStatus('⚠ Publication bloquée — terme à risque dans le récit : « ' + _bad + ' ». Corrige le texte puis republie.', 'text-danger'); toast('Récit bloqué : « ' + _bad + ' »', 'error'); return; }
         const pubBtn = document.getElementById('drecit-publish'); pubBtn.disabled = true; const o = pubBtn.textContent; pubBtn.textContent = 'Publication…';
         try {
           await publishRecitToKv(devis.jeton, recit);
