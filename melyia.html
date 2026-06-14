@@ -1826,6 +1826,7 @@ Règles :
         try {
           const r = await window.melyiaElectron.extractPdfText(base64);
           if (r && r.ok && r.text) {
+            window._lastPdfText = r.text; // debug : « copier le texte lu » si la lecture exacte échoue
             if (/Traitement proposé/i.test(r.text)) { data = parseDevisFromText(r.text); if (!data.actes.length) pdfDiag = 'tableau « Traitement proposé » non reconnu'; }
             else pdfDiag = '« Traitement proposé » introuvable dans le texte du PDF';
           } else { pdfDiag = (r && r.error) ? ('pdf-parse : ' + r.error) : 'lecture PDF vide'; }
@@ -1836,6 +1837,12 @@ Règles :
         if (!getSetting('apiKey', '')) { toast('Lecture PDF impossible (' + pdfDiag + ')', 'warning'); return; }
         console.warn('[Melyia] import devis — repli IA, raison :', pdfDiag);
         toast('Lecture exacte indispo (' + pdfDiag + ') — tentative IA…', 'info');
+        if (window._lastPdfText) {
+          setTimeout(() => toastConfirm('Lecture exacte ratée. Copier le texte lu du PDF (pour que je règle le parseur) ?', {
+            confirmLabel: 'Copier', cancelLabel: 'Non', durationMs: 25000,
+            onConfirm: async () => { try { await navigator.clipboard.writeText(window._lastPdfText); toast('Texte du PDF copié — colle-le dans le chat', 'success'); } catch (e) { toast('Copie impossible : ' + e.message, 'error'); } }
+          }), 700);
+        }
         const ai = await geminiExtract(base64, mimeType || 'application/pdf', { prompt: GEMINI_DEVIS_PROMPT, maxOutputTokens: 8192 });
         const aiActes = Array.isArray(ai.soins) ? ai.soins.map(s => ({ dent: s && s.dent, libelle: s && s.libelle })) : [];
         data = {
@@ -2289,6 +2296,10 @@ Règles :
         <div class="grouped-row">
           <div class="text-[14px] text-ink-700">Soins</div>
           <div class="text-[14px] font-medium text-right max-w-[60%]">${esc(devis.soins)}</div>
+        </div>
+        <div class="grouped-row">
+          <div class="text-[14px] text-ink-700">Devis PDF</div>
+          <div class="text-[14px] font-medium text-right">${devis.pdfBase64 ? '📎 ' + esc(devis.pdfName || 'enregistré') : '<span class="text-ink-400">non enregistré</span>'}</div>
         </div>
         <div class="grouped-row">
           <div class="text-[14px] text-ink-700">Envoyé le</div>
@@ -3981,6 +3992,9 @@ Actes du TRAITEMENT PROPOSÉ uniquement (libellé + dent) : {{soins}}
 Clés de soins disponibles pour les fiches illustrées (à réutiliser telles quelles) : {{soinsKeys}}
 Notes éventuelles du praticien : {{notes}}
 
+MES TEXTES DE RÉFÉRENCE PAR SOIN (ta SOURCE PRIORITAIRE de contenu — assemble-les, n'invente pas) :
+{{reference}}
+
 TU RÉPONDS UNIQUEMENT EN JSON STRICT, sans aucun texte autour ni balise de code :
 {
   "objectif": "Une phrase (15-25 mots) annonçant le but clinique global du plan.",
@@ -3997,6 +4011,7 @@ TU RÉPONDS UNIQUEMENT EN JSON STRICT, sans aucun texte autour ni balise de code
 }
 
 RÈGLES
+0. SOURCE DU CONTENU : utilise EN PRIORITÉ « MES TEXTES DE RÉFÉRENCE » ci-dessus comme matière du « pourquoi » (paragraphes[0]) et du « déroulé » (paragraphes[1]). Tu les ASSEMBLES en une histoire cohérente (transitions fluides), tu les adaptes légèrement et tu injectes les noms de dents — mais tu n'inventes AUCUN contenu clinique nouveau et tu n'omets rien d'important. Reprends le "titre" et le "CONSEIL" fournis quand ils existent. Si un soin n'a pas de texte de référence, rédige sobrement et brièvement.
 1. STRUCTURE PAR PHASE clinique (intention), jamais une liste d'actes. Regroupe par intention (ex. « reprise de la racine » ; « reconstitution + nouvelle couronne » ; « assainissement parodontal »). MAX 3 phases. Une seule dent ⇒ 1 à 2 phases. N'invente pas de phases pour « faire riche ».
 2. CHAQUE phase, champ "paragraphes" : [0] = LE POURQUOI (ce qu'est le problème et ce que le soin vise — 1 à 3 phrases, TOUJOURS visible) ; [1] = LE DÉROULÉ (comment ça se passe concrètement — 1 à 3 phrases, replié sur la page). Acte simple/rassurant (composite, détartrage, overlay) : un seul paragraphe (le pourquoi) suffit.
 3. SYNTHÉTISE les étapes techniques en une histoire. NE LISTE JAMAIS les actes intermédiaires bruts. Synthèses imposées :
@@ -4021,6 +4036,48 @@ INTERDITS ABSOLUS
 - N'invente AUCUNE dent, AUCUN soin, AUCUN diagnostic absent de {{soins}} / {{notes}}.
 - Pas de salutation, pas de formule de politesse finale, pas de signature : ajoutées automatiquement.
 - N'affiche jamais de numéro de sécurité sociale ni de date de naissance.`;
+
+  // v2.6.14 — BANQUE DE TEXTES par soin (la voix du Dr, écrite une fois, réutilisée).
+  // lia ASSEMBLE ces blocs (ne les réinvente pas) en injectant les dents. Le Dr peut
+  // surcharger via le réglage `soinBank` (JSON). pourquoi = visible / deroule = replié.
+  const DEFAULT_SOIN_BANK = {
+    rte: { titre: "Reprendre le traitement de la racine", pourquoi: "Cette dent a déjà bénéficié d'un traitement de racine par le passé. Avec le temps, ce traitement est devenu insuffisamment étanche, et une petite inflammation s'est installée à l'extrémité de la racine, le plus souvent sans douleur. La reprise du traitement vise précisément à la faire disparaître pour conserver la dent.", deroule: "Après le retrait de l'ancienne restauration, je procède au retraitement du canal : un nettoyage et une désinfection en profondeur du réseau de racines, sous contrôle radiographique, afin d'éliminer l'infection et de permettre à l'os de cicatriser." },
+    te: { titre: "Traiter la racine de la dent", pourquoi: "La carie a atteint le nerf de la dent, ce qui peut entraîner douleur et infection. Le traitement de la racine a pour but de retirer ce nerf abîmé et d'assainir l'intérieur de la dent afin de la conserver.", deroule: "Je nettoie et désinfecte les canaux de la racine, puis je les referme hermétiquement. La dent, plus fragile, sera ensuite protégée." },
+    couronne: { titre: "Reconstituer et protéger la dent", pourquoi: "Une fois la racine assainie, la dent doit retrouver sa solidité et être protégée durablement, car elle devient plus fragile.", deroule: "Je reconstitue d'abord la dent à l'aide d'un ancrage qui en soutient la structure, puis je pose une couronne sur mesure qui la recoiffe et lui rend tout son rôle dans la mastication. Une couronne provisoire peut être posée le temps de la fabrication de la définitive." },
+    overlay: { titre: "Restaurer la dent par une pièce céramique", pourquoi: "La dent a perdu du volume (carie ou ancien amalgame infiltré) mais peut être conservée sans couronne complète.", deroule: "Je réalise une pièce en céramique fabriquée sur mesure qui s'imbrique sur la dent pour en reconstruire la partie manquante, de manière solide, esthétique et durable." },
+    composite: { titre: "Soigner la dent par un composite", pourquoi: "Une carie ou une petite perte de matière doit être réparée pour stopper son évolution et restaurer la dent.", deroule: "Je retire la partie abîmée et je reconstitue la dent avec un matériau de sa couleur, en une séance." },
+    carie: { titre: "Soigner la carie", pourquoi: "La carie est une atteinte de la dent par les bactéries ; non traitée, elle progresse vers le nerf. Le soin vise à l'éliminer et à restaurer la dent.", deroule: "Je nettoie la zone atteinte et je restaure la dent avec un matériau adapté." },
+    bridge: { titre: "Remplacer la dent manquante par un bridge", pourquoi: "Une dent absente déséquilibre la mastication et fait bouger les dents voisines. Le bridge la remplace en prenant appui sur les dents adjacentes.", deroule: "Je prépare les dents piliers, puis je pose un bridge sur mesure qui remplace la dent manquante et rétablit la mastication." },
+    'couronne-implant': { titre: "Poser la couronne sur l'implant", pourquoi: "Une fois l'implant intégré à l'os, il faut lui poser la dent visible.", deroule: "Je fixe sur l'implant une couronne sur mesure, au rendu naturel, qui remplace la dent." },
+    implant: { titre: "Remplacer la racine par un implant", pourquoi: "Pour remplacer une dent absente sans toucher aux dents voisines, l'implant remplace la racine de la dent.", deroule: "Je pose une racine artificielle dans l'os ; après une période de cicatrisation de quelques mois, elle reçoit sa couronne définitive." },
+    comblement: { titre: "Préserver le volume de l'os", pourquoi: "Après la perte d'une dent, l'os de la mâchoire a tendance à se résorber. Le comblement préserve son volume pour la suite du traitement.", deroule: "Lors de l'extraction, je place un matériau qui maintient le volume osseux et favorise une bonne cicatrisation." },
+    'greffe-osseuse': { titre: "Reconstruire l'os avant l'implant", pourquoi: "Le volume d'os disponible est insuffisant pour ancrer un implant de façon stable.", deroule: "Je reconstitue l'os manquant afin de préparer un support solide à l'implant." },
+    paro: { titre: "Assainir les gencives", pourquoi: "La parodontite est une maladie inflammatoire d'origine bactérienne qui touche les tissus de soutien des dents (la gencive et l'os), entraînant des poches et une perte progressive d'ancrage. Le traitement a pour but d'éliminer l'infection et de stopper cette évolution.", deroule: "Je procède à un assainissement sous-gingival en profondeur pour retirer le tartre et la plaque bactérienne. Lors de ces séances, nous calibrons ensemble les brossettes interdentaires adaptées à vos espaces.", conseil: "Pensez à apporter votre brosse à dents électrique pour que nous fassions le point ensemble sur votre brossage." },
+    'maintenance-paro': { titre: "Maintenir l'équilibre des gencives", pourquoi: "Après l'assainissement, des séances de contrôle régulières sont nécessaires pour éviter les récidives.", deroule: "Nous mettons en place des séances de contrôle et de nettoyage régulières pour maintenir l'équilibre de votre bouche." },
+    'greffe-gencive': { titre: "Renforcer la gencive", pourquoi: "Une gencive qui se rétracte expose la racine et fragilise la dent.", deroule: "Je renforce la gencive autour de la dent pour protéger la racine et stabiliser la situation." },
+    dds: { titre: "Retirer la dent de sagesse", pourquoi: "La dent de sagesse, mal positionnée ou source d'infection, doit être retirée pour éviter des complications.", deroule: "Je procède à l'extraction sous anesthésie locale, en veillant à votre confort." },
+    'chirurgie-orale': { titre: "Intervention chirurgicale", pourquoi: "Une intervention ciblée est nécessaire pour traiter la zone concernée.", deroule: "Je réalise le geste sous anesthésie locale, avec un suivi de cicatrisation." },
+    detartrage: { titre: "Détartrage", pourquoi: "Le tartre accumulé entretient l'inflammation des gencives.", deroule: "Je retire le tartre et la plaque pour assainir vos gencives." },
+    blanchiment: { titre: "Éclaircir les dents", pourquoi: "Pour retrouver des dents plus claires, de façon contrôlée et sans les abîmer.", deroule: "Je réalise un éclaircissement adapté à vos dents, sous surveillance." },
+    amovible: { titre: "Remplacer les dents par un appareil", pourquoi: "Pour remplacer plusieurs dents absentes de façon confortable.", deroule: "Je réalise un appareil sur mesure qui remplace les dents manquantes et rétablit la mastication." }
+  };
+
+  function getSoinBank() {
+    try { const raw = getSetting('soinBank', ''); if (raw) return JSON.parse(raw); } catch (e) {}
+    return DEFAULT_SOIN_BANK;
+  }
+  // Construit le bloc "textes de référence" injecté dans le prompt lia (uniquement les soins du devis).
+  function buildSoinReference(soinsKeys) {
+    const bank = getSoinBank();
+    const keys = [...new Set((soinsKeys || []).filter(Boolean))];
+    const blocs = keys.map(k => {
+      const b = bank[k]; if (!b) return null;
+      let s = '## ' + (b.titre || k) + ' [' + k + ']\nPOURQUOI : ' + (b.pourquoi || '') + '\nDÉROULÉ : ' + (b.deroule || '');
+      if (b.conseil) s += '\nCONSEIL : ' + b.conseil;
+      return s;
+    }).filter(Boolean);
+    return blocs.length ? blocs.join('\n\n') : '(aucun texte de référence pour ces soins — rédige sobrement)';
+  }
 
   const DEFAULT_RELANCE_TEMPLATE_1 = `{{salutation}},
 
@@ -5104,7 +5161,8 @@ Bien cordialement,`;
         }
         const userEmailFresh = getSetting('googleUserEmail', '') || userEmail;
         await Gmail.sendEmail({ to, subject, body, from: doctorName && userEmailFresh ? `${doctorName} <${userEmailFresh}>` : '', attachments });
-        await db.devis.update(devis.id, { devisMailSentAt: new Date().toISOString() });
+        const _att0 = attachments[0];
+        await db.devis.update(devis.id, Object.assign({ devisMailSentAt: new Date().toISOString() }, _att0 ? { pdfName: _att0.filename, pdfBase64: _att0.dataB64 } : {}));
         pendingDevisPdf = null;
         toast(attachments.length ? 'Devis envoyé (PDF joint) ✓' : 'Devis envoyé ✓ (sans PDF)', 'success');
         closeDetail();
@@ -5134,7 +5192,8 @@ Bien cordialement,`;
             .split('{{patient}}').join(patientLabel)
             .split('{{soins}}').join(devis.soins || buildPlanList(devis))
             .split('{{notes}}').join(devis.notes ? String(devis.notes) : '(aucune)')
-            .split('{{soinsKeys}}').join((mdKeys || []).join(', '));
+            .split('{{soinsKeys}}').join((mdKeys || []).join(', '))
+            .split('{{reference}}').join(buildSoinReference(mdKeys));
           const recit = parseGeminiJson(await geminiGenerateText(prompt, { temperature: 0.5, maxOutputTokens: 8192 }));
           recit.salutation = buildSalutation(pInfo);
           recit.nom = patientFullName(pInfo);
