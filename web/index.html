@@ -1293,7 +1293,8 @@
   const SENSITIVE_SETTING_KEYS = new Set([
     'melyia_googleClientSecret',
     'melyia_apiKey',
-    'melyia_google_tokens'
+    'melyia_google_tokens',
+    'melyia_publishKey'
   ]);
   function isSettingExportable(key) {
     return key.startsWith('melyia_') && !SENSITIVE_SETTING_KEYS.has(key);
@@ -1497,6 +1498,45 @@
     };
     const b64 = btoa(unescape(encodeURIComponent(JSON.stringify(obj)))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
     return SITE_URL + '/mon-devis' + (utm ? '?' + utm : '') + '#' + b64;
+  }
+
+  // ========================================
+  // PAGE PREMIUM « MON DEVIS » v2 — récit lia stocké dans Cloudflare KV
+  // (le récit complet dépasse la limite d'URL du fragment → backend KV).
+  // ========================================
+  const SITE_API_DEVIS = SITE_URL + '/api/devis';
+
+  // URL de la page premium pilotée par le récit KV : /mon-devis?utm&d=<jeton>.
+  function buildMonDevisKvUrl(jeton, utm) {
+    const qs = [];
+    if (utm) qs.push(utm);
+    qs.push('d=' + encodeURIComponent(jeton || ''));
+    return SITE_URL + '/mon-devis?' + qs.join('&');
+  }
+
+  // Montant (number) → reste à charge formaté FR « 1 532,35 » (sans €, ajouté par la page).
+  function fmtRac(m) {
+    const n = Number(m);
+    if (!isFinite(n) || n <= 0) return '';
+    return n.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+
+  // Parse une réponse Gemini censée être du JSON (tolère ```json … ``` et texte autour).
+  function parseGeminiJson(txt) {
+    let s = String(txt || '').trim();
+    s = s.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/i, '').trim();
+    if (s[0] !== '{') { const i = s.indexOf('{'), j = s.lastIndexOf('}'); if (i !== -1 && j !== -1 && j > i) s = s.slice(i, j + 1); }
+    return JSON.parse(s);
+  }
+
+  // Publie le récit JSON dans KV sous un jeton (POST /api/devis). Auth Bearer si PUBLISH_KEY réglée.
+  async function publishRecitToKv(jeton, recitObj) {
+    const headers = { 'Content-Type': 'application/json' };
+    const key = getSetting('publishKey', '');
+    if (key) headers['Authorization'] = 'Bearer ' + key;
+    const res = await fetch(SITE_API_DEVIS, { method: 'POST', headers, body: JSON.stringify({ d: jeton, payload: recitObj }) });
+    if (!res.ok) { let m = ''; try { m = (await res.json()).error || ''; } catch (e) {} throw new Error('publication échouée (' + res.status + (m ? ' — ' + m : '') + ')'); }
+    return true;
   }
 
   // Agrège les clés de soins de TOUS les devis non-refusés d'un patient (multi-devis
@@ -3908,6 +3948,58 @@ N'hésitez pas à me solliciter si vous avez la moindre interrogation.
 
 Réponds UNIQUEMENT avec le corps du mail prêt à coller. Pas d'objet, pas de "Voici le mail :", juste le texte. Termine par une phrase de disponibilité (par exemple « Je reste à votre disposition pour toute question. »). N'ajoute NI formule de politesse finale (« Bien cordialement »), NI signature, NI diplômes : la signature et les liens du cabinet sont ajoutés automatiquement après ton texte.`;
 
+  // v2.6.12 — Prompt « récit » lia (sortie JSON STRICT) pour la page premium /mon-devis.
+  // Alimente la page web (récit par phases) ; relu par le Dr avant publication dans KV.
+  const DEFAULT_RECIT_PROMPT = `RÔLE
+Tu es la plume du Dr Sohaïb Kebieche, chirurgien-dentiste à Colombes. À partir des actes captés sur le devis d'un patient, tu rédiges — à la PREMIÈRE PERSONNE du praticien (« je » ; « nous » pour le geste au fauteuil) — le récit personnalisé de son plan de traitement, affiché sur une page web premium à son nom. Clair, professionnel, cordial, rassurant ; jamais bavard ni commercial.
+
+DONNÉES (captées, faillibles — relues par le praticien)
+Patient : {{patient}}
+Actes du TRAITEMENT PROPOSÉ uniquement (libellé + dent) : {{soins}}
+Clés de soins disponibles pour les fiches illustrées (à réutiliser telles quelles) : {{soinsKeys}}
+Notes éventuelles du praticien : {{notes}}
+
+TU RÉPONDS UNIQUEMENT EN JSON STRICT, sans aucun texte autour ni balise de code :
+{
+  "objectif": "Une phrase (15-25 mots) annonçant le but clinique global du plan.",
+  "phases": [
+    {
+      "titre": "Titre clinique court (3-6 mots)",
+      "dents": ["46"],
+      "soinsKeys": ["rte","couronne"],
+      "paragraphes": ["LE POURQUOI (toujours visible)", "LE DÉROULÉ (replié, optionnel)"]
+    }
+  ],
+  "conseils": [],
+  "cloture": "Prochaine étape : se faire rappeler / appeler le secrétariat pour fixer les rendez-vous, puis une phrase de disponibilité."
+}
+
+RÈGLES
+1. STRUCTURE PAR PHASE clinique (intention), jamais une liste d'actes. Regroupe par intention (ex. « reprise de la racine » ; « reconstitution + nouvelle couronne » ; « assainissement parodontal »). MAX 3 phases. Une seule dent ⇒ 1 à 2 phases. N'invente pas de phases pour « faire riche ».
+2. CHAQUE phase, champ "paragraphes" : [0] = LE POURQUOI (ce qu'est le problème et ce que le soin vise — 1 à 3 phrases, TOUJOURS visible) ; [1] = LE DÉROULÉ (comment ça se passe concrètement — 1 à 3 phrases, replié sur la page). Acte simple/rassurant (composite, détartrage, overlay) : un seul paragraphe (le pourquoi) suffit.
+3. SYNTHÉTISE les étapes techniques en une histoire. NE LISTE JAMAIS les actes intermédiaires bruts. Synthèses imposées :
+   - dépose couronne / dépose inlay core / dépose → « le retrait de l'ancienne couronne et de son ancrage » (mentionné en passant).
+   - désobturation / mise en forme / obturation canalaire / rétroalvéolaires → « le retraitement du canal : un nettoyage et une désinfection en profondeur du réseau de racines, sous contrôle radiographique ».
+   - inlay core / faux moignon / tenon → « la reconstitution de la dent à l'aide d'un ancrage qui en soutient la structure ».
+   - couronne provisoire + couronne (céramo-métallique / céramique / zircone) → « une couronne provisoire puis, après cicatrisation, la couronne définitive ».
+   - surfaçage / débridement / assainissement sous-gingival → « la thérapeutique parodontale (assainissement sous-gingival) ».
+   Termes BANNIS du texte patient : dépose, inlay core, faux moignon, désobturation, rétroalvéolaire, mise en forme.
+4. NOMENCLATURE : nomme chaque dent en clair, position EN TOUTES LETTRES + numéro EN CHIFFRES entre parenthèses. Format exact : « la Première molaire en bas à droite (46) ». Jamais « dent 46 », jamais le numéro en lettres. Renseigne aussi "dents" (numéros) et "soinsKeys" (uniquement parmi les clés fournies) de chaque phase.
+5. LONGUEUR proportionnée à l'ENJEU, pas au nombre d'actes : objectif 1 phrase ; pourquoi 1-3 phrases ; déroulé 1-3 phrases ; récit total 180-320 mots pour un plan simple, 550 mots MAX. Aucun paragraphe de plus de 3 phrases.
+6. PARODONTITE (si une phase parodontale est présente) : explique en 1-2 phrases — maladie inflammatoire d'origine bactérienne touchant les tissus de soutien (gencive et os), avec perte progressive d'ancrage ; le traitement vise à stopper cette infection. Ajoute alors dans "conseils" : apporter sa brosse à dents électrique pour calibrer ensemble les brossettes interdentaires.
+7. DÉLAI / MISE EN OBSERVATION : ne chiffre JAMAIS un délai (ex. « environ 6 mois ») de ta propre initiative — UNIQUEMENT si le praticien l'a écrit dans {{notes}}. Ne décris une couronne provisoire « le temps de la cicatrisation » QUE si l'acte « couronne provisoire » est présent ou si {{notes}} l'indique. Formule l'inflammation par son BUT, jamais par la peur : « une petite inflammation s'est installée à l'extrémité de la racine ; la reprise du traitement vise précisément à la faire disparaître ».
+8. CLÔTURE (champ "cloture") : invite le patient à indiquer quand il souhaite commencer → le secrétariat le rappellera pour fixer ensemble les rendez-vous, ou il peut appeler le cabinet ; termine par une phrase de disponibilité. NE PARLE PAS de mutuelle ni de remboursement dans la clôture.
+9. NIVEAU DE LANGUE : lectorat 6e-8e. Traduis tout jargon. Voix « je » médicale, chaleur SOBRE (pas de sirop, pas d'emoji, pas de « ne vous inquiétez pas »).
+
+INTERDITS ABSOLUS
+- JAMAIS l'alternative thérapeutique / RAC0 / panier 100% Santé / « acte sans reste à charge ».
+- AUCUN montant, prix, ni mot sur le remboursement ou la mutuelle, nulle part dans le récit (ni objectif, ni phases, ni clôture).
+- AUCUN superlatif (« excellent », « parfait », « le meilleur »), AUCUNE garantie de résultat. Emploie « a pour but de », « vise à », « permet de ».
+- JAMAIS : « spécialiste », « AP-HP », « bloc », « anesthésie générale ». L'anesthésie est locale.
+- N'invente AUCUNE dent, AUCUN soin, AUCUN diagnostic absent de {{soins}} / {{notes}}.
+- Pas de salutation, pas de formule de politesse finale, pas de signature : ajoutées automatiquement.
+- N'affiche jamais de numéro de sécurité sociale ni de date de naissance.`;
+
   const DEFAULT_RELANCE_TEMPLATE_1 = `{{salutation}},
 
 J'espère que vous allez bien. Mon équipe et moi-même revenons vers vous au sujet du devis que nous vous avons adressé le {{date_envoi}}. Prendre le temps de la réflexion est tout à fait normal : nous voulions simplement nous assurer qu'il ne vous manque rien pour décider.
@@ -4952,6 +5044,19 @@ Bien cordialement,`;
           <input id="dcompose-pdf" type="file" accept="application/pdf" class="input !h-auto !py-2.5"/>
           <p class="text-[11px] text-ink-400 mt-1 ml-1">PDF joint au mail. S'il a été importé, il est déjà attaché — sinon sélectionne-le ici.</p>
         </div>
+        <div class="rounded-xl p-3" style="border:1px solid #E6E3DC; background:#FAFAF8">
+          <div class="flex items-center justify-between">
+            <span class="text-[13px] font-semibold text-ink-700">✨ Page premium du patient (récit lia)</span>
+            <button id="drecit-gen" type="button" class="text-[13px] text-accent font-semibold">Générer</button>
+          </div>
+          <p id="drecit-status" class="text-[12px] text-ink-500 mt-1 hidden"></p>
+          <textarea id="drecit-json" rows="9" class="input !text-[12px] mt-2 hidden" style="font-family:ui-monospace,Menlo,Consolas,monospace" placeholder="Récit (JSON) — relis et corrige le texte si besoin"></textarea>
+          <div id="drecit-actions" class="flex items-center gap-4 mt-2 hidden">
+            <button id="drecit-publish" type="button" class="text-[13px] text-accent font-semibold">Publier + utiliser le lien</button>
+            <a id="drecit-preview" href="#" target="_blank" rel="noopener" class="text-[13px] text-ink-500 underline">Prévisualiser</a>
+          </div>
+          <p class="text-[11px] text-ink-400 mt-1">Génère le récit, relis-le, publie : le lien du mail pointera vers la page premium. Sinon le lien reste la version simple (cartes).</p>
+        </div>
         <div>
           <label class="text-[13px] font-medium text-ink-700 block mb-1.5 ml-1">Corps du mail</label>
           <textarea id="dcompose-body" rows="11" class="input !text-[14px]" style="font-family: inherit">${filled.replace(/</g, '&lt;')}</textarea>
@@ -4996,6 +5101,64 @@ Bien cordialement,`;
       }
       });
     });
+
+    // --- Page premium (récit lia) : Générer → relire → Publier dans KV → lien du mail ---
+    const recitGenBtn = document.getElementById('drecit-gen');
+    if (recitGenBtn) {
+      const statusEl = document.getElementById('drecit-status');
+      const jsonEl = document.getElementById('drecit-json');
+      const actionsEl = document.getElementById('drecit-actions');
+      const setStatus = (msg, cls) => { statusEl.classList.remove('hidden'); statusEl.textContent = msg; statusEl.className = 'text-[12px] mt-1 ' + (cls || 'text-ink-500'); };
+      recitGenBtn.addEventListener('click', () => withBusyGuard('recit-gen', async () => {
+        if (!getSetting('apiKey', '')) { toast('Clé API Gemini manquante (Réglages)', 'warning'); return; }
+        recitGenBtn.disabled = true; const o = recitGenBtn.textContent; recitGenBtn.textContent = '…';
+        setStatus('Génération du récit…', 'text-ink-500');
+        try {
+          const patientLabel = (titreOf(pInfo) ? titreOf(pInfo) + ' ' : '') + patientFullName(pInfo);
+          const prompt = getSetting('recitPrompt', DEFAULT_RECIT_PROMPT)
+            .split('{{patient}}').join(patientLabel)
+            .split('{{soins}}').join(devis.soins || buildPlanList(devis))
+            .split('{{notes}}').join(devis.notes ? String(devis.notes) : '(aucune)')
+            .split('{{soinsKeys}}').join((mdKeys || []).join(', '));
+          const recit = parseGeminiJson(await geminiGenerateText(prompt, { temperature: 0.5, maxOutputTokens: 8192 }));
+          recit.salutation = buildSalutation(pInfo);
+          recit.nom = patientFullName(pInfo);
+          recit.jeton = devis.jeton;
+          const rac = fmtRac(devis.montant);
+          if (rac) recit.rac = rac;
+          jsonEl.value = JSON.stringify(recit, null, 2);
+          jsonEl.classList.remove('hidden');
+          actionsEl.classList.remove('hidden');
+          setStatus('✓ Récit généré — relis, puis « Publier + utiliser le lien ».', 'text-success');
+          recitGenBtn.textContent = 'Régénérer';
+        } catch (e) {
+          setStatus('Erreur : ' + e.message, 'text-danger');
+          toast('Génération échouée : ' + e.message, 'error');
+          recitGenBtn.textContent = o;
+        } finally { recitGenBtn.disabled = false; }
+      }));
+      document.getElementById('drecit-publish').addEventListener('click', () => withBusyGuard('recit-publish', async () => {
+        let recit;
+        try { recit = JSON.parse(jsonEl.value); } catch (e) { toast('JSON invalide — corrige le texte (guillemets / virgules).', 'error'); return; }
+        recit.jeton = devis.jeton;
+        recit.salutation = recit.salutation || buildSalutation(pInfo);
+        recit.nom = recit.nom || patientFullName(pInfo);
+        const pubBtn = document.getElementById('drecit-publish'); pubBtn.disabled = true; const o = pubBtn.textContent; pubBtn.textContent = 'Publication…';
+        try {
+          await publishRecitToKv(devis.jeton, recit);
+          try { await db.devis.update(devis.id, { recitPublishedAt: new Date().toISOString() }); } catch (e) {}
+          const kvUrl = buildMonDevisKvUrl(devis.jeton, UTM_DEVIS);
+          const oldUrl = buildMonDevisUrl(devis.jeton, pInfo, mdKeys, UTM_DEVIS);
+          const bodyEl = document.getElementById('dcompose-body');
+          if (bodyEl) bodyEl.value = bodyEl.value.split(oldUrl).join(kvUrl);
+          const prev = document.getElementById('drecit-preview'); prev.href = kvUrl;
+          setStatus('✓ Page publiée — le lien du mail pointe vers le récit. Prévisualise puis envoie.', 'text-success');
+          toast('Page premium publiée ✓', 'success');
+        } catch (e) {
+          toast('Publication : ' + e.message, 'error');
+        } finally { pubBtn.disabled = false; pubBtn.textContent = o; }
+      }));
+    }
   }
 
   async function openComposeRelanceModal(devis, pInfo) {
