@@ -1507,6 +1507,20 @@
     return [...new Set(keys.filter(Boolean))];
   }
 
+  // Libellés patients des soins (pour citer le plan dans le mail de devis).
+  const SOIN_LABELS = {
+    implant: "Pose d'implant", comblement: "Comblement osseux", 'greffe-osseuse': "Reconstruction osseuse pré-implantaire", 'chirurgie-orale': "Chirurgie orale", dds: "Dents de sagesse",
+    paro: "Traitement parodontal (gencives)", 'greffe-gencive': "Greffe de gencive", 'maintenance-paro': "Maintenance parodontale",
+    overlay: "Inlay / onlay / overlay céramique", composite: "Composite", couronne: "Couronne", bridge: "Bridge", 'couronne-implant': "Couronne sur implant", amovible: "Prothèse amovible",
+    carie: "Soin de carie", te: "Traitement de racine (dévitalisation)", rte: "Retraitement de racine", detartrage: "Détartrage", blanchiment: "Blanchiment"
+  };
+  // Liste « plan de traitement » pour le mail : à partir des tags soins, sinon le texte libre.
+  function buildPlanList(devis) {
+    const keys = (devis && Array.isArray(devis.soinsKeys)) ? devis.soinsKeys.filter(Boolean) : [];
+    if (keys.length) return keys.map(k => '- ' + (SOIN_LABELS[k] || k)).join('\n');
+    return (devis && devis.soins) ? String(devis.soins) : '';
+  }
+
   // Signature plein texte (bloc Logos : collé en clair dans Logos, pas d'écrin HTML).
   const SIGNATURE_PLAIN = `Bien cordialement,
 Dr Sohaïb Kebieche
@@ -3768,12 +3782,15 @@ Bien cordialement,`;
   // v2.6.5 — Mail initial du devis envoyé par Mélyia (écrin premium + PDF officiel en PJ).
   const DEFAULT_DEVIS_TEMPLATE = `{{salutation}},
 
-Suite à notre consultation, je vous adresse votre devis (en pièce jointe), accompagné d'une page personnelle qui vous explique chaque soin proposé, simplement :
+Suite à notre consultation, je vous adresse votre devis (en pièce jointe).
+
+Voici les soins que nous avons prévus ensemble :
+{{plan}}
+
+Pour comprendre chacun de ces soins simplement, j'ai préparé une page personnelle, avec des schémas, à relire à tête reposée :
 [Voir mon devis expliqué]({{lien_comprendre}})
 
-Vous y retrouverez le détail de votre plan de traitement, à relire à tête reposée. Le devis ci-joint fait référence.
-
-Pour toute question, répondez simplement à ce mail ou appelez le cabinet au 01 42 42 94 69.
+Le devis ci-joint fait référence. Pour toute question, répondez simplement à ce mail ou appelez le cabinet au 01 42 42 94 69.
 
 Bien cordialement,`;
 
@@ -4746,6 +4763,7 @@ Bien cordialement,`;
       .replaceAll('{{prenom}}', pInfo.prenom || '')
       .replaceAll('{{nom}}', pInfo.nom || '')
       .replaceAll('{{lien_comprendre}}', buildMonDevisUrl(devis.jeton, pInfo, mdKeys, UTM_DEVIS))
+      .replaceAll('{{plan}}', buildPlanList(devis))
       .replaceAll('{{doctor}}', doctorName);
     const userEmail = getSetting('googleUserEmail', '');
     const html = `
