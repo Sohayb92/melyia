@@ -1793,22 +1793,27 @@ Règles :
     const start = t.indexOf('Traitement proposé');
     const altIdx = t.search(/Information Alternative|Actes?\s+sans reste à charge/);
     const section = t.slice(start >= 0 ? start : 0, altIdx >= 0 ? altIdx : undefined);
+    const lines = section.split('\n');
     const actes = [];
-    const lineRe = /\n\s*\d+\s+(\d{1,2})\s+([A-Z]{4}\d{3})\s+([^\n]+)/g;
-    let m;
-    while ((m = lineRe.exec(section))) {
-      const dent = m[1], code = m[2];
-      let rest = m[3].trim();
-      const numIdx = rest.search(/\s(?:NR|\d[\d\s  ]*,\d{2})\b/);
-      let libelle = numIdx >= 0 ? rest.slice(0, numIdx).trim() : rest;
-      libelle = libelle.replace(/\s+\d+(?:\s+\d+)?\s+Aucun\s*$/i, '').replace(/\s+\d+(?:\s+\d+)?$/, '').trim();
-      actes.push({ dent, code, libelle });
+    // pdf-parse colle les colonnes : [N trait][dent(2)][cotation CCAM = 4 lettres + 3 chiffres][nature][montants...]
+    const rowRe = /^\s*(\d{1,4})([A-Z]{4}\d{3})(.+)$/;
+    for (const line of lines) {
+      const m = rowRe.exec(line);
+      if (!m) continue;
+      const dent = m[1].slice(-2), code = m[2];
+      const natM = m[3].match(/^[^\d]+/); // nature = caracteres non-chiffres en tete (avant panier/materiau/montant)
+      let libelle = (natM ? natM[0] : m[3]).replace(/\s+/g, ' ').replace(/\s*Aucun\s*$/i, '').trim();
+      if (libelle) actes.push({ dent, code, libelle });
     }
     let total_honoraires = null, total_reste = null;
-    const mTot = section.match(/TOTAL[^\n]*envisag[^\n]*/i);
-    if (mTot) {
-      const nums = mTot[0].match(/\d[\d\s  ]*,\d{2}/g) || [];
-      if (nums.length) { total_honoraires = _devisNum(nums[0]); total_reste = _devisNum(nums[nums.length - 1]); }
+    // "TOTAL ... envisages" et ses montants sont sur des lignes separees -> on scanne les lignes suivantes.
+    const ti = lines.findIndex(function (l) { return /TOTAL.*envisag/i.test(l); });
+    if (ti >= 0) {
+      for (let k = ti; k < Math.min(ti + 4, lines.length); k++) {
+        const norm = lines[k].replace(/\s/g, ''); // enleve tous les espaces (y compris insecables    )
+        const nums = norm.match(/\d+,\d{2}/g);
+        if (nums && nums.length) { total_honoraires = _devisNum(nums[0]); total_reste = _devisNum(nums[nums.length - 1]); break; }
+      }
     }
     const soinsKeys = [...new Set(actes.map(a => acteToSoinKey(a.libelle)).filter(Boolean))];
     if (soinsKeys.includes('rte')) { const i = soinsKeys.indexOf('te'); if (i >= 0) soinsKeys.splice(i, 1); } // un retraitement couvre déjà l'endo
