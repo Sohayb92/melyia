@@ -1293,6 +1293,32 @@
     maintenances: '++id, patient_id, type, intervalle_mois, prochain_rappel, actif',
     rappels_maintenance: '++id, maintenance_id, date'
   });
+  db.version(6).stores({
+    patients: '++id, nom, prenom, email, telephone, created_at',
+    devis: '++id, patient_id, status, date_envoi, dateAcceptation, dateRefus, dateSansReponse, soinTermine, dateSoinTermine, googleReviewMailSent, date_relance_prevue, montant',
+    relances: '++id, devis_id, date',
+    maintenances: '++id, patient_id, type, intervalle_mois, prochain_rappel, actif',
+    rappels_maintenance: '++id, maintenance_id, date',
+    pdfs: '++id, devis_id'
+  });
+  // v6 — table `pdfs` ajoutée (sans transformation : ne peut pas bloquer l'ouverture).
+  // La migration des PDF existants (devis.pdfBase64 -> table pdfs) se fait EN DIFFÉRÉ après
+  // l'ouverture (migratePdfsOnce), best-effort : si elle échoue, l'app s'ouvre quand même.
+  async function migratePdfsOnce() {
+    if (getSetting('pdfsMigratedV6', '') === '1') return;
+    try {
+      const all = await db.devis.toArray();
+      for (const d of all) {
+        if (!d.pdfBase64) continue;
+        try {
+          await db.pdfs.add({ devis_id: d.id, name: d.pdfName || 'devis.pdf', base64: d.pdfBase64 });
+          const clean = Object.assign({}, d); delete clean.pdfBase64; clean.pdfStored = true;
+          await db.devis.put(clean);
+        } catch (e) { /* ce devis échoue : on le laisse tel quel, on continue */ }
+      }
+      setSetting('pdfsMigratedV6', '1');
+    } catch (e) { /* réessaiera au prochain démarrage */ }
+  }
   // v5 — Ajout patient.googleReviewSentManuallyAt (non indexé, set quand on envoie un mail d'avis manuel)
 
   // ========================================
@@ -2369,7 +2395,7 @@ Règles :
         </div>
         <div class="grouped-row">
           <div class="text-[14px] text-ink-700">Devis PDF</div>
-          <div class="text-[14px] font-medium text-right">${devis.pdfBase64 ? '📎 ' + esc(devis.pdfName || 'enregistré') : '<span class="text-ink-400">non enregistré</span>'}</div>
+          <div class="text-[14px] font-medium text-right">${(devis.pdfStored || devis.pdfBase64) ? '📎 ' + esc(devis.pdfName || 'enregistré') : '<span class="text-ink-400">non enregistré</span>'}</div>
         </div>
         <div class="grouped-row">
           <div class="text-[14px] text-ink-700">Envoyé le</div>
@@ -3078,7 +3104,8 @@ Règles :
     document.getElementById('stat-devis-count').textContent = `${monthDevisEnvoyes.length} devis envoyé${monthDevisEnvoyes.length > 1 ? 's' : ''}`;
 
     document.getElementById('stat-ca-accepte').textContent = fmtMoney(caAccepte);
-    document.getElementById('stat-ca-accepte-delta').innerHTML = formatDelta(caAccepte, caAcceptePrev);
+    // Mois en cours encore à 0 → « Mois en cours » plutôt que « -100 % vs M-1 » (faux négatif en début de mois)
+    document.getElementById('stat-ca-accepte-delta').innerHTML = (offset === 0 && !caAccepte) ? '<span class="text-ink-400">Mois en cours</span>' : formatDelta(caAccepte, caAcceptePrev);
     document.getElementById('stat-accepte-count').textContent = `${acceptes.length} accepté${acceptes.length > 1 ? 's' : ''} ce mois`;
 
     // v2.5.10 — Card devient "Soins terminés ce mois" (vrai output clinique mensuel)
@@ -5300,7 +5327,8 @@ Bien cordialement,`;
         const userEmailFresh = getSetting('googleUserEmail', '') || userEmail;
         await Gmail.sendEmail({ to, subject, body, from: doctorName && userEmailFresh ? `${doctorName} <${userEmailFresh}>` : '', attachments });
         const _att0 = attachments[0];
-        await db.devis.update(devis.id, Object.assign({ devisMailSentAt: new Date().toISOString() }, _att0 ? { pdfName: _att0.filename, pdfBase64: _att0.dataB64 } : {}));
+        await db.devis.update(devis.id, Object.assign({ devisMailSentAt: new Date().toISOString() }, _att0 ? { pdfName: _att0.filename, pdfStored: true } : {}));
+        if (_att0) { try { await db.pdfs.where('devis_id').equals(devis.id).delete(); await db.pdfs.add({ devis_id: devis.id, name: _att0.filename, base64: _att0.dataB64 }); } catch (e) {} } // PDF hors table devis (perf)
         pendingDevisPdf = null;
         toast(attachments.length ? 'Devis envoyé (PDF joint) ✓' : 'Devis envoyé ✓ (sans PDF)', 'success');
         closeDetail();
@@ -6235,6 +6263,7 @@ Bien cordialement,`;
     setTimeout(checkDrivePull, 3000);
     setTimeout(suggestStaleDevisCleanup, 5000);
     setTimeout(checkGoogleReviewQueue, 4000);
+    setTimeout(migratePdfsOnce, 2500); // migration PDF différée (best-effort : ne bloque jamais l'app)
     offerTemplatesMigrationV241();
   }
 
