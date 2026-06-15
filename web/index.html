@@ -1698,6 +1698,7 @@ Règles :
 - Pour le nom, mets le nom de famille SEUL
 - Pour le prénom, première lettre en majuscule
 - Vérifie qu'un email contient @ et un point
+- Le téléphone est un numéro français (≈10 chiffres, commence par 0 — souvent 06/07 pour un mobile). N'utilise JAMAIS un numéro de dossier, de Sécurité sociale, une date de naissance ni un montant comme téléphone : en cas de doute, mets null.
 - Réponds UNIQUEMENT avec le JSON, RIEN d'autre, pas de markdown, pas de code fence`;
 
   // Helper : retry avec exponential backoff sur erreurs Gemini transitoires (429 rate limit, 503 overloaded, 500 internal)
@@ -1747,7 +1748,7 @@ Règles :
         { text: opts.prompt || GEMINI_EXTRACT_PROMPT },
         { inlineData: { mimeType: mimeType, data: base64Image } }
       ]}],
-      generationConfig: { temperature: 0.2, maxOutputTokens: opts.maxOutputTokens || 512 }
+      generationConfig: { temperature: 0.2, maxOutputTokens: opts.maxOutputTokens || 512, responseMimeType: 'application/json' }
     });
     if (!data.candidates || !data.candidates[0]) throw new Error('Réponse Gemini vide');
     let text = data.candidates[0].content.parts[0].text.trim();
