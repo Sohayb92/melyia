@@ -386,6 +386,7 @@
       <div class="mb-4 mt-5 flex items-center justify-between gap-3">
         <h1 class="text-[18px] font-semibold tracking-tight">Rappels <span class="text-ink-400 font-normal ml-1.5" id="reminders-count">0</span></h1>
         <div class="flex gap-2">
+          <button id="new-reminder-btn" class="btn btn-primary btn-sm">+ Rappel</button>
           <select id="reminders-filter-type" class="input !h-9 !text-sm !w-auto !px-3">
             <option value="">Tous types</option>
             <option value="paro">Paro</option>
@@ -1084,7 +1085,12 @@
         </div>
         <div class="space-y-3">
           <input type="hidden" id="maintenance-patient-id">
-          <div class="text-[14px] text-ink-700" id="maintenance-patient-name">Patient</div>
+          <div class="text-[15px] font-medium text-ink-800" id="maintenance-patient-name">Patient</div>
+          <div id="maintenance-patient-picker" class="hidden">
+            <label class="text-[13px] font-medium text-ink-700 block mb-1.5 ml-1">Patient</label>
+            <input id="maintenance-picker-input" type="text" placeholder="Rechercher un patient…" class="input" autocomplete="off"/>
+            <div id="maintenance-picker-results" class="mt-1 max-h-44 overflow-y-auto bg-white border border-ink-200 rounded-xl divide-y divide-ink-100 hidden"></div>
+          </div>
           <div>
             <label class="text-[13px] font-medium text-ink-700 block mb-1.5 ml-1">Type de suivi</label>
             <select id="maintenance-type" class="input">
@@ -4916,16 +4922,61 @@ Bien cordialement,`;
   let currentMaintenancePatient = null;
 
   function openMaintenanceModal(patient) {
-    if (!patient) return;
-    currentMaintenancePatient = patient;
-    document.getElementById('maintenance-patient-id').value = patient.id;
-    document.getElementById('maintenance-patient-name').textContent = patientFullName(patient);
+    currentMaintenancePatient = patient || null;
+    const nameEl = document.getElementById('maintenance-patient-name');
+    const pickerEl = document.getElementById('maintenance-patient-picker');
+    if (patient) {
+      document.getElementById('maintenance-patient-id').value = patient.id;
+      nameEl.textContent = patientFullName(patient);
+      nameEl.classList.remove('hidden');
+      pickerEl.classList.add('hidden');
+    } else {
+      // Ouvert depuis l'onglet Rappels (sans patient) → sélecteur de patient
+      document.getElementById('maintenance-patient-id').value = '';
+      nameEl.classList.add('hidden');
+      pickerEl.classList.remove('hidden');
+      const pi = document.getElementById('maintenance-picker-input');
+      pi.value = '';
+      document.getElementById('maintenance-picker-results').classList.add('hidden');
+      setTimeout(() => pi.focus(), 60);
+    }
     document.getElementById('maintenance-type').value = 'paro';
     document.getElementById('maintenance-interval').value = '6';
     document.getElementById('maintenance-start').value = new Date().toISOString().slice(0, 10);
     document.getElementById('modal-maintenance-overlay').classList.remove('hidden');
     document.body.style.overflow = 'hidden';
   }
+  // Bouton « + Rappel » de l'onglet Rappels + sélecteur de patient intégré à la modale.
+  (function () {
+    const nrb = document.getElementById('new-reminder-btn');
+    if (nrb) nrb.addEventListener('click', () => openMaintenanceModal());
+    const pi = document.getElementById('maintenance-picker-input');
+    if (!pi) return;
+    let t = null;
+    pi.addEventListener('input', (e) => {
+      clearTimeout(t);
+      t = setTimeout(async () => {
+        const resultsEl = document.getElementById('maintenance-picker-results');
+        const q = e.target.value.trim();
+        if (q.length < 1) { resultsEl.classList.add('hidden'); resultsEl.innerHTML = ''; return; }
+        const matches = await searchPatients(q);
+        resultsEl.innerHTML = matches.length
+          ? matches.slice(0, 8).map(p => `<div class="maint-picker-result px-4 py-3 cursor-pointer hover:bg-ink-50 text-[14px]" data-id="${p.id}">${esc(patientFullName(p))}</div>`).join('')
+          : '<div class="px-4 py-3 text-[14px] text-ink-500">Aucun patient trouvé</div>';
+        resultsEl.classList.remove('hidden');
+        document.querySelectorAll('.maint-picker-result').forEach(el => el.addEventListener('click', async () => {
+          const p = await db.patients.get(parseInt(el.dataset.id));
+          if (!p) return;
+          currentMaintenancePatient = p;
+          document.getElementById('maintenance-patient-id').value = p.id;
+          const nameEl = document.getElementById('maintenance-patient-name');
+          nameEl.textContent = patientFullName(p);
+          nameEl.classList.remove('hidden');
+          document.getElementById('maintenance-patient-picker').classList.add('hidden');
+        }));
+      }, 150);
+    });
+  })();
   function closeMaintenanceModal() {
     document.getElementById('modal-maintenance-overlay').classList.add('hidden');
     document.body.style.overflow = '';
@@ -4941,7 +4992,7 @@ Bien cordialement,`;
     if (def) document.getElementById('maintenance-interval').value = def.defaultMonths;
   });
   document.getElementById('save-maintenance').addEventListener('click', async () => {
-    if (!currentMaintenancePatient) return;
+    if (!currentMaintenancePatient) { toast('Choisis d\'abord un patient', 'warning'); return; }
     const type = document.getElementById('maintenance-type').value;
     const intervalle_mois = parseInt(document.getElementById('maintenance-interval').value) || 6;
     const date_debut = document.getElementById('maintenance-start').value;
