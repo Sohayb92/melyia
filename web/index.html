@@ -228,7 +228,7 @@
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
           Importer
         </button>
-        <input type="file" id="import-devis-input" accept="application/pdf" style="display:none"/>
+        <input type="file" id="import-devis-input" accept="application/pdf" multiple style="display:none"/>
       </nav>
     </div>
   </header>
@@ -1863,9 +1863,13 @@ Règles :
     return { patient: { nom, prenom }, numeroLogos, actes, soinsKeys, total_honoraires, total_reste_a_charge: total_reste };
   }
 
+  let _importQueue = []; // import multi-devis : les PDF restants à traiter, l'un après l'autre
+  function processNextImport() { const f = _importQueue.shift(); if (f) importDevisFromPdf(f); }
+
   async function importDevisFromPdf(file) {
     if (!file) return;
-    toast('Lecture du devis en cours…', 'info');
+    const _qn = _importQueue.length;
+    toast(_qn ? ('Lecture du devis… (' + (_qn + 1) + ' au total)') : 'Lecture du devis en cours…', 'info');
     try {
       const { base64, mimeType } = await fileToBase64(file);
       let data = null, pdfDiag = '';
@@ -2241,7 +2245,7 @@ Règles :
     const ii = document.getElementById('import-devis-input');
     if (ib && ii) {
       ib.addEventListener('click', () => ii.click());
-      ii.addEventListener('change', (e) => { const f = e.target.files && e.target.files[0]; e.target.value = ''; if (f) importDevisFromPdf(f); });
+      ii.addEventListener('change', (e) => { const files = Array.from(e.target.files || []); e.target.value = ''; if (files.length) { _importQueue = files; processNextImport(); } });
     }
   })();
   document.getElementById('open-new-btn-mobile').addEventListener('click', () => openModal());
@@ -2307,7 +2311,11 @@ Règles :
     await refreshPatientsCache();
     renderDashboard();
     if (typeof scheduleAutoBackup === 'function') scheduleAutoBackup();
-    if (_proposeSendDevis && _proposeSendDevis.patient && _proposeSendDevis.patient.email && GoogleAuth.isConnected()) {
+    if (_importQueue.length) {
+      // Import multi-devis : on enchaîne le PDF suivant (pas de proposition d'envoi entre chaque)
+      toast('Devis enregistré · ' + _importQueue.length + ' à importer', 'info');
+      setTimeout(processNextImport, 300);
+    } else if (_proposeSendDevis && _proposeSendDevis.patient && _proposeSendDevis.patient.email && GoogleAuth.isConnected()) {
       setTimeout(() => {
         toastConfirm('Devis enregistré. L\'envoyer au patient maintenant ?', {
           confirmLabel: 'Envoyer le devis',
