@@ -1412,12 +1412,13 @@
     const q = (query || '').toLowerCase().trim();
     const all = await db.patients.toArray();
     if (!q) return all;
-    return all.filter(p =>
-      (p.nom || '').toLowerCase().includes(q) ||
-      (p.prenom || '').toLowerCase().includes(q) ||
-      (p.email || '').toLowerCase().includes(q) ||
-      (p.telephone || '').toLowerCase().includes(q)
-    );
+    // Multi-mots : « Sohaïb Kebieche » matche un patient nom=Kebieche prénom=Sohaïb
+    // (chaque mot doit apparaître dans nom+prénom+email+tél réunis).
+    const words = q.split(/\s+/).filter(Boolean);
+    return all.filter(p => {
+      const hay = [p.nom, p.prenom, p.email, p.telephone].map(x => (x || '').toLowerCase()).join(' ');
+      return words.every(w => hay.includes(w));
+    });
   }
 
   async function getDevisForPatient(patientId) {
@@ -1552,7 +1553,8 @@
     let s = String(txt || '').trim();
     s = s.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/i, '').trim();
     if (s[0] !== '{') { const i = s.indexOf('{'), j = s.lastIndexOf('}'); if (i !== -1 && j !== -1 && j > i) s = s.slice(i, j + 1); }
-    return JSON.parse(s);
+    try { return JSON.parse(s); }
+    catch (e) { return JSON.parse(s.replace(/,(\s*[}\]])/g, '$1')); } // secours : retire les virgules traînantes
   }
 
   // Publie le récit JSON dans KV sous un jeton (POST /api/devis). Auth Bearer si PUBLISH_KEY réglée.
@@ -1906,7 +1908,8 @@ Règles :
         soins: soinsTxt,
         soinsKeys: data.soinsKeys || [],
         montant: (montant != null ? montant : ''),
-        patientName: patientName
+        patientName: patientName,
+        patient: data.patient || null
       }), 120);
       toast('Devis lu — vérifie (surtout les tags soins) puis enregistre', 'success');
     } catch (e) {
@@ -1920,9 +1923,11 @@ Règles :
     if (!apiKey) throw new Error('Clé API Gemini manquante (Réglages)');
     const model = opts.model || 'gemini-2.5-flash';
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+    const generationConfig = { temperature: opts.temperature ?? 0.7, maxOutputTokens: opts.maxOutputTokens ?? 4096 };
+    if (opts.json) generationConfig.responseMimeType = 'application/json'; // sortie JSON valide garantie par Gemini
     const data = await geminiFetchWithRetry(url, {
       contents: [{ parts: [{ text: prompt }] }],
-      generationConfig: { temperature: opts.temperature ?? 0.7, maxOutputTokens: opts.maxOutputTokens ?? 4096 }
+      generationConfig
     });
     if (!data.candidates || !data.candidates[0]) throw new Error('Réponse Gemini vide');
     return data.candidates[0].content.parts[0].text.trim();
@@ -2187,6 +2192,17 @@ Règles :
         if (prefill.patientName && !prefilledPatient) {
           const pick = document.getElementById('patient-picker-input');
           if (pick) { pick.value = prefill.patientName; searchPatientsInPicker(prefill.patientName); }
+          // Relie automatiquement au dossier patient EXISTANT si correspondance exacte (nom + prénom)
+          (async () => {
+            try {
+              const np = (prefill.patient && prefill.patient.prenom) || '';
+              const nn = (prefill.patient && prefill.patient.nom) || '';
+              if (nn || np) {
+                const match = await findPotentialDuplicatePatient({ nom: nn, prenom: np, email: '' });
+                if (match) selectPatient(match);
+              }
+            } catch (e) {}
+          })();
         }
       }
     }
@@ -2227,9 +2243,7 @@ Règles :
   })();
   document.getElementById('open-new-btn-mobile').addEventListener('click', () => openModal());
   document.getElementById('cancel-modal').addEventListener('click', closeModal);
-  document.getElementById('modal-form-overlay').addEventListener('click', (e) => {
-    if (e.target.id === 'modal-form-overlay') closeModal();
-  });
+  // Clic en dehors ne ferme PLUS la modale de saisie (évite de perdre le formulaire) — fermer via Annuler.
 
   // Patient picker input
   let pickerSearchTimer = null;
@@ -3548,9 +3562,7 @@ Règles :
   }
 
   document.getElementById('cancel-patient-modal').addEventListener('click', closePatientModal);
-  document.getElementById('modal-patient-overlay').addEventListener('click', (e) => {
-    if (e.target.id === 'modal-patient-overlay') closePatientModal();
-  });
+  // Clic en dehors ne ferme PLUS la modale patient (évite de perdre la saisie) — fermer via Annuler.
 
   document.getElementById('patient-capture-zone').addEventListener('click', () => {
     document.getElementById('patient-capture-file-input').click();
@@ -5264,7 +5276,7 @@ Bien cordialement,`;
             .split('{{notes}}').join(devis.notes ? String(devis.notes) : '(aucune)')
             .split('{{soinsKeys}}').join((mdKeys || []).join(', '))
             .split('{{reference}}').join(buildSoinReference(mdKeys));
-          const recit = parseGeminiJson(await geminiGenerateText(prompt, { temperature: 0.3, maxOutputTokens: 8192 }));
+          const recit = parseGeminiJson(await geminiGenerateText(prompt, { temperature: 0.3, maxOutputTokens: 8192, json: true }));
           recit.salutation = buildSalutation(pInfo);
           recit.nom = patientFullName(pInfo);
           recit.jeton = devis.jeton;
