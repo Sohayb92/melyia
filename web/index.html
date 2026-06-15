@@ -4739,7 +4739,15 @@ Bien cordialement,`;
       const token = await GoogleAuth.getAccessToken();
       const htmlBody = this._textToHtml(body);
       const headers = [];
-      if (from) headers.push(`From: ${from}`);
+      if (from) {
+        const fm = from.match(/^(.*?)\s*<([^>]+)>\s*$/);
+        if (fm && /[^\x00-\x7F]/.test(fm[1])) {
+          const nameB64 = btoa(unescape(encodeURIComponent(fm[1].trim()))); // encoded-word RFC 2047 (nom accentué)
+          headers.push(`From: =?UTF-8?B?${nameB64}?= <${fm[2]}>`);
+        } else {
+          headers.push(`From: ${from}`);
+        }
+      }
       headers.push(`To: ${to}`);
       if (bcc) headers.push(`Bcc: ${bcc}`);
       const subjectB64 = btoa(unescape(encodeURIComponent(subject || '')));
@@ -5396,6 +5404,7 @@ Bien cordialement,`;
   // AUTO-BACKUP DRIVE (debounced)
   // ========================================
   let _autoBackupTimer = null;
+  let _backupFailNotified = false;
   function scheduleAutoBackup() {
     if (getSetting('autoBackupEnabled', '0') !== '1') return;
     if (!GoogleAuth.isConnected()) return;
@@ -5406,10 +5415,13 @@ Bien cordialement,`;
         await Drive.uploadBackup(json);
         // Bug #4 fix : track last successful push to detect "modifs locales pending" plus tard
         setSetting('lastSyncedToDrive', String(Date.now()));
-        Drive.cleanupOldBackups(15).catch(() => {});
+        Drive.cleanupOldBackups(5).catch(() => {});
+        if (_backupFailNotified) { _backupFailNotified = false; toast('Sauvegarde Drive rétablie ✓', 'success'); }
         console.log('[Melyia] Auto-backup Drive ✓');
       } catch (e) {
         console.error('[Melyia] Auto-backup Drive failed:', e);
+        // Ne pas échouer en silence : le Dr doit savoir que ses modifs ne sont pas sauvegardées (1 alerte par série d'échecs)
+        if (!_backupFailNotified) { _backupFailNotified = true; toast('⚠ Sauvegarde Drive échouée — tes dernières modifs ne sont pas encore sauvegardées (vérifie ta connexion Google).', 'error'); }
       }
     }, 30000);
   }
