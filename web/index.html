@@ -2840,9 +2840,11 @@ Règles :
     });
   });
   updateNonSignesChipsUI();
+  let _filterSearchTimer = null;
   document.getElementById('filter-search').addEventListener('input', (e) => {
     currentSearch = e.target.value.toLowerCase();
-    renderDashboard();
+    clearTimeout(_filterSearchTimer);
+    _filterSearchTimer = setTimeout(renderDashboard, 150);
   });
 
   // ========================================
