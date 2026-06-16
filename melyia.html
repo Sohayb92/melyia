@@ -1912,6 +1912,7 @@ Règles :
   }
 
   let _importQueue = []; // import multi-devis : les PDF restants à traiter, l'un après l'autre
+  let _importBatchPatient = null; // patient choisi sur le 1er devis du lot → réutilisé pour les suivants (anti-doublon)
   function processNextImport() { const f = _importQueue.shift(); if (f) importDevisFromPdf(f); }
 
   async function importDevisFromPdf(file) {
@@ -2252,10 +2253,13 @@ Règles :
             try {
               const np = (prefill.patient && prefill.patient.prenom) || '';
               const nn = (prefill.patient && prefill.patient.nom) || '';
-              if (nn || np) {
-                const match = await findPotentialDuplicatePatient({ nom: nn, prenom: np, email: '' });
-                if (match) selectPatient(match);
+              if (!nn && !np) return;
+              // Multi-import : même patient que le devis précédent du lot → on relie direct (anti-doublon)
+              if (_importBatchPatient && _normPrenom(_importBatchPatient.prenom) === _normPrenom(np) && (_importBatchPatient.nom || '').toLowerCase().trim() === nn.toLowerCase().trim()) {
+                selectPatient(_importBatchPatient); return;
               }
+              const match = await findPotentialDuplicatePatient({ nom: nn, prenom: np, email: '' });
+              if (match) selectPatient(match);
             } catch (e) {}
           })();
         }
@@ -2293,7 +2297,7 @@ Règles :
     const ii = document.getElementById('import-devis-input');
     if (ib && ii) {
       ib.addEventListener('click', () => ii.click());
-      ii.addEventListener('change', (e) => { const files = Array.from(e.target.files || []); e.target.value = ''; if (files.length) { _importQueue = files; processNextImport(); } });
+      ii.addEventListener('change', (e) => { const files = Array.from(e.target.files || []); e.target.value = ''; if (files.length) { _importQueue = files; _importBatchPatient = null; processNextImport(); } });
     }
   })();
   document.getElementById('open-new-btn-mobile').addEventListener('click', () => openModal());
@@ -2360,7 +2364,8 @@ Règles :
     renderDashboard();
     if (typeof scheduleAutoBackup === 'function') scheduleAutoBackup();
     if (_importQueue.length) {
-      // Import multi-devis : on enchaîne le PDF suivant (pas de proposition d'envoi entre chaque)
+      // Import multi-devis : on retient le patient pour relier les devis suivants (anti-doublon) + on enchaîne
+      _importBatchPatient = selectedPatientForDevis;
       toast('Devis enregistré · ' + _importQueue.length + ' à importer', 'info');
       setTimeout(processNextImport, 300);
     } else if (_proposeSendDevis && _proposeSendDevis.patient && _proposeSendDevis.patient.email && GoogleAuth.isConnected()) {
