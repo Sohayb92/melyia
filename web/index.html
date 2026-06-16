@@ -4031,17 +4031,17 @@ Règles :
   // SETTINGS
   // ========================================
   const MAINTENANCE_TYPES = {
-    'paro': { label: 'Maintenance parodontale', defaultMonths: 6, conseil: '[En savoir plus sur la parodontie et son suivi →](https://drkebieche.fr/soins/parodontologie)' },
-    'implant': { label: 'Suivi implants', defaultMonths: 6, conseil: 'Ce contrôle nous permet de vérifier la bonne tenue de votre implant et la santé des tissus autour.' },
-    'ortho': { label: 'Contrôle post-ortho', defaultMonths: 12, conseil: '' },
-    'controle': { label: 'Contrôle annuel', defaultMonths: 12, conseil: '' }
+    'paro': { label: 'Maintenance parodontale', defaultMonths: 6, suivi: "Ce suivi régulier est important : c'est lui qui permet de surveiller et d'entretenir dans la durée les soins que nous avons réalisés ensemble. Mon équipe et moi-même y tenons.", conseil: '[Entretenir vos gencives au quotidien : nos conseils →](https://drkebieche.fr/conseils/hygiene)' },
+    'implant': { label: 'Suivi implants', defaultMonths: 6, suivi: "Ce suivi régulier est important : c'est lui qui permet de surveiller et d'entretenir dans la durée les soins que nous avons réalisés ensemble. Mon équipe et moi-même y tenons.", conseil: "Ce contrôle nous permet de vérifier la bonne tenue de votre implant et la santé des tissus autour.\n\n[Bien entretenir vos implants au quotidien →](https://drkebieche.fr/conseils/maintenance-implants)" },
+    'ortho': { label: 'Contrôle post-ortho', defaultMonths: 12, suivi: "Ce suivi régulier est important : c'est lui qui permet de surveiller et d'entretenir dans la durée les soins que nous avons réalisés ensemble. Mon équipe et moi-même y tenons.", conseil: '[Nos conseils pour un brossage efficace →](https://drkebieche.fr/conseils/hygiene)' },
+    'controle': { label: 'Contrôle annuel', defaultMonths: 12, suivi: "Ce suivi régulier est important : il permet de surveiller et d'entretenir votre santé bucco-dentaire dans la durée. Mon équipe et moi-même y tenons.", conseil: '[Nos conseils pour un brossage efficace →](https://drkebieche.fr/conseils/hygiene)' }
   };
 
   const DEFAULT_MAINTENANCE_TEMPLATE = `{{salutation}},
 
 J'espère que vous allez bien. Le moment approche pour votre prochaine séance de {{type_maintenance}}.
 
-Ce suivi régulier est important : c'est lui qui permet de surveiller et d'entretenir dans la durée les soins que nous avons réalisés ensemble. Mon équipe et moi-même y tenons.{{conseil_maintenance}}
+{{phrase_suivi}}{{conseil_maintenance}}
 
 Vous pouvez prendre rendez-vous directement en ligne :
 [[Prendre rendez-vous|{{lien_rdv}}]]
@@ -5106,6 +5106,7 @@ Bien cordialement,`;
       .replaceAll('{{prenom}}', patient.prenom || '')
       .replaceAll('{{nom}}', patient.nom || '')
       .replaceAll('{{type_maintenance}}', typeLabel)
+      .replaceAll('{{phrase_suivi}}', (MAINTENANCE_TYPES[maintenance.type] && MAINTENANCE_TYPES[maintenance.type].suivi) || "Ce suivi régulier est important : il permet de surveiller et d'entretenir votre santé bucco-dentaire dans la durée. Mon équipe et moi-même y tenons.")
       .replaceAll('{{conseil_maintenance}}', (MAINTENANCE_TYPES[maintenance.type] && MAINTENANCE_TYPES[maintenance.type].conseil) ? '\n\n' + MAINTENANCE_TYPES[maintenance.type].conseil : '')
       .replaceAll('{{lien_rdv}}', DOCTOLIB_BOOKING_URL)
       .replaceAll('{{doctor}}', doctor);
