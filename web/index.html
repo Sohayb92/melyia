@@ -1634,8 +1634,22 @@
   // Liste « plan de traitement » pour le mail : à partir des tags soins, sinon le texte libre.
   function buildPlanList(devis) {
     const keys = (devis && Array.isArray(devis.soinsKeys)) ? devis.soinsKeys.filter(Boolean) : [];
-    if (keys.length) return keys.map(k => '- ' + (SOIN_LABELS[k] || k)).join('\n');
-    return (devis && devis.soins) ? String(devis.soins) : '';
+    // Dents par soin : extraites du texte capté "Libellé (dents)" pour les rattacher au bon soin.
+    const dentsByKey = {};
+    const soinsTxt = (devis && devis.soins) ? String(devis.soins) : '';
+    const reDents = /([^()]+?)\s*\(([\d\s,]+)\)/g;
+    let mDent;
+    while ((mDent = reDents.exec(soinsTxt))) {
+      const dk = acteToSoinKey(mDent[1].replace(/^[\s,]+/, ''));
+      if (!dk) continue;
+      (dentsByKey[dk] = dentsByKey[dk] || []).push(...mDent[2].split(/[\s,]+/).filter(Boolean));
+    }
+    if (keys.length) return keys.map(k => {
+      const label = SOIN_LABELS[k] || k;
+      const dents = [...new Set(dentsByKey[k] || [])];
+      return dents.length ? '- ' + label + ' (' + (dents.length > 1 ? 'dents ' : 'dent ') + dents.join(', ') + ')' : '- ' + label;
+    }).join('\n');
+    return soinsTxt;
   }
 
   // Signature plein texte (bloc Logos : collé en clair dans Logos, pas d'écrin HTML).
@@ -4017,7 +4031,7 @@ Règles :
   // SETTINGS
   // ========================================
   const MAINTENANCE_TYPES = {
-    'paro': { label: 'Maintenance parodontale', defaultMonths: 6, conseil: 'Pensez à apporter votre brosse à dents électrique : nous en profiterons pour recalibrer ensemble vos brossettes interdentaires.' },
+    'paro': { label: 'Maintenance parodontale', defaultMonths: 6, conseil: '[En savoir plus sur la parodontie et son suivi →](https://drkebieche.fr/soins/parodontologie)' },
     'implant': { label: 'Suivi implants', defaultMonths: 6, conseil: 'Ce contrôle nous permet de vérifier la bonne tenue de votre implant et la santé des tissus autour.' },
     'ortho': { label: 'Contrôle post-ortho', defaultMonths: 12, conseil: '' },
     'controle': { label: 'Contrôle annuel', defaultMonths: 12, conseil: '' }
@@ -4027,9 +4041,8 @@ Règles :
 
 J'espère que vous allez bien. Le moment approche pour votre prochaine séance de {{type_maintenance}}.
 
-Ce suivi régulier est important : c'est lui qui permet de surveiller et d'entretenir dans la durée les soins que nous avons réalisés ensemble. Mon équipe et moi-même y tenons.
+Ce suivi régulier est important : c'est lui qui permet de surveiller et d'entretenir dans la durée les soins que nous avons réalisés ensemble. Mon équipe et moi-même y tenons.{{conseil_maintenance}}
 
-{{conseil_maintenance}}
 Vous pouvez prendre rendez-vous directement en ligne :
 [[Prendre rendez-vous|{{lien_rdv}}]]
 ou nous appeler au 01 42 42 94 69.
@@ -5093,7 +5106,7 @@ Bien cordialement,`;
       .replaceAll('{{prenom}}', patient.prenom || '')
       .replaceAll('{{nom}}', patient.nom || '')
       .replaceAll('{{type_maintenance}}', typeLabel)
-      .replaceAll('{{conseil_maintenance}}', (MAINTENANCE_TYPES[maintenance.type] && MAINTENANCE_TYPES[maintenance.type].conseil) || '')
+      .replaceAll('{{conseil_maintenance}}', (MAINTENANCE_TYPES[maintenance.type] && MAINTENANCE_TYPES[maintenance.type].conseil) ? '\n\n' + MAINTENANCE_TYPES[maintenance.type].conseil : '')
       .replaceAll('{{lien_rdv}}', DOCTOLIB_BOOKING_URL)
       .replaceAll('{{doctor}}', doctor);
 
