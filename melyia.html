@@ -1946,7 +1946,6 @@ Règles :
 
   let _importQueue = []; // import multi-devis : les PDF restants à traiter, l'un après l'autre
   let _importBatchPatient = null; // patient choisi sur le 1er devis du lot → réutilisé pour les suivants (anti-doublon)
-  let _importBatchDevis = []; // import multi-devis : {id, soins, soinsKeys, montant, notes, jeton, pdf} du lot, pour l'envoi groupe a la fin (C2)
   function processNextImport() { const f = _importQueue.shift(); if (f) importDevisFromPdf(f); }
 
   async function importDevisFromPdf(file) {
@@ -2331,7 +2330,7 @@ Règles :
     const ii = document.getElementById('import-devis-input');
     if (ib && ii) {
       ib.addEventListener('click', () => ii.click());
-      ii.addEventListener('change', (e) => { const files = Array.from(e.target.files || []); e.target.value = ''; if (files.length) { _importQueue = files; _importBatchPatient = null; _importBatchDevis = []; processNextImport(); } });
+      ii.addEventListener('change', (e) => { const files = Array.from(e.target.files || []); e.target.value = ''; if (files.length) { _importQueue = files; _importBatchPatient = null; processNextImport(); } });
     }
   })();
   document.getElementById('open-new-btn-mobile').addEventListener('click', () => openModal());
@@ -2391,9 +2390,10 @@ Règles :
       data.created_at = new Date().toISOString();
       const _newDevisId = await db.devis.add(data);
       _proposeSendDevis = { devis: Object.assign({ id: _newDevisId }, data), patient: selectedPatientForDevis };
-      if (pendingDevisPdf || _importQueue.length || _importBatchPatient) {
-        // C2 : ce devis fait partie d'un lot d'import → on le mémorise (avec son PDF) pour l'envoi groupé
-        _importBatchDevis.push({ id: _newDevisId, soins: data.soins, soinsKeys: data.soinsKeys, montant: data.montant, notes: data.notes, jeton: data.jeton, pdf: pendingDevisPdf ? { name: pendingDevisPdf.name, base64: pendingDevisPdf.base64 } : null });
+      if (pendingDevisPdf && pendingDevisPdf.base64) {
+        // C2 (modèle B) : on range le PDF dès l'import → l'envoi groupé se reconstruit depuis la base (table pdfs), même plus tard
+        try { await db.pdfs.where('devis_id').equals(_newDevisId).delete(); await db.pdfs.add({ devis_id: _newDevisId, name: pendingDevisPdf.name, base64: pendingDevisPdf.base64 }); } catch (e) {}
+        try { await db.devis.update(_newDevisId, { pdfName: pendingDevisPdf.name, pdfStored: true }); } catch (e) {}
       }
       toast('Devis enregistré', 'success');
     }
@@ -2402,33 +2402,29 @@ Règles :
     renderDashboard();
     if (typeof scheduleAutoBackup === 'function') scheduleAutoBackup();
     if (_importQueue.length) {
-      // Import multi-devis : on retient le patient pour relier les devis suivants (anti-doublon) + on enchaîne
+      // Import multi-devis : on enchaîne, le patient du 1er devis est réutilisé pour les suivants (anti-doublon)
       _importBatchPatient = selectedPatientForDevis;
-      toast('Devis enregistré · ' + _importQueue.length + ' à importer', 'info');
+      toast('Devis importé · ' + _importQueue.length + ' restant' + (_importQueue.length > 1 ? 's' : '') + '…', 'info');
       setTimeout(processNextImport, 300);
-    } else if (_importBatchDevis.length >= 2) {
-      // C2 : fin d'un lot multi-devis → un seul mail groupé (tous les PDF + page agrégée)
-      const _batch = _importBatchDevis.slice();
-      const _grpPatient = _importBatchPatient || selectedPatientForDevis;
-      _importBatchDevis = []; _importBatchPatient = null;
-      if (_grpPatient && _grpPatient.email && GoogleAuth.isConnected()) {
-        setTimeout(() => {
-          toastConfirm('Lot de ' + _batch.length + ' devis enregistré. Envoyer un seul mail groupé au patient ?', {
-            confirmLabel: 'Envoyer le mail groupé',
-            onConfirm: () => openComposeDevisGrouped(_batch, _grpPatient)
-          });
-        }, 400);
+    } else if (pendingDevisPdf || _importBatchPatient) {
+      // C2 (modèle B) : fin de l'import → pop-up d'envoi DIRECT ; le groupé se reconstruit depuis les devis « En attente » non-envoyés du patient
+      const _impPatient = _importBatchPatient || selectedPatientForDevis;
+      const _impDevis = _proposeSendDevis ? _proposeSendDevis.devis : null;
+      _importBatchPatient = null;
+      if (!_impPatient || !_impPatient.email) {
+        toast('Devis importé (pas d\'email patient → à envoyer depuis sa fiche).', 'info');
+      } else if (!GoogleAuth.isConnected()) {
+        toast('Devis importé. Connecte-toi à Google pour l\'envoyer.', 'warning');
+      } else if (_impDevis) {
+        setTimeout(() => openComposeDevisSmart(_impDevis, _impPatient), 350);
       }
     } else if (_proposeSendDevis && _proposeSendDevis.patient && _proposeSendDevis.patient.email && GoogleAuth.isConnected()) {
-      _importBatchDevis = [];
       setTimeout(() => {
         toastConfirm('Devis enregistré. L\'envoyer au patient maintenant ?', {
           confirmLabel: 'Envoyer le devis',
-          onConfirm: () => openComposeDevisModal(_proposeSendDevis.devis, _proposeSendDevis.patient)
+          onConfirm: () => openComposeDevisSmart(_proposeSendDevis.devis, _proposeSendDevis.patient)
         });
       }, 400);
-    } else {
-      _importBatchDevis = [];
     }
     });
   });
@@ -2568,7 +2564,7 @@ Règles :
         }
         if (action === 'envoyer-devis') {
           closeDetail();
-          openComposeDevisModal(devis, pInfo);
+          openComposeDevisSmart(devis, pInfo);
           return;
         }
         if (action === 'vulgarize-logos') {
@@ -5353,6 +5349,29 @@ Bien cordialement,`;
   // ========================================
   // COMPOSE RELANCE MAIL (via Gmail)
   // ========================================
+  // C2 (modèle B) : reconstruit le lot d'envoi depuis la base = devis « En attente » non encore envoyés du patient (PDF inclus).
+  async function gatherUnsentDevisForSend(patientId) {
+    const list = await db.devis.where('patient_id').equals(patientId).toArray();
+    const unsent = list.filter(d => d.status === 'En attente' && !d.devisMailSentAt);
+    unsent.sort((a, b) => (a.id || 0) - (b.id || 0));
+    const out = [];
+    for (const d of unsent) {
+      let pdf = null;
+      try { const rec = await db.pdfs.where('devis_id').equals(d.id).first(); if (rec && rec.base64) pdf = { name: rec.name, base64: rec.base64 }; } catch (e) {}
+      out.push({ id: d.id, soins: d.soins, soinsKeys: d.soinsKeys, montant: d.montant, notes: d.notes, jeton: d.jeton, pdf });
+    }
+    return out;
+  }
+
+  // Ouvre le bon pop-up d'envoi : groupé si le patient a des devis en attente (PDF rechargés depuis la base), sinon simple.
+  async function openComposeDevisSmart(devis, pInfo) {
+    const pid = (pInfo && pInfo.id) || (devis && devis.patient_id);
+    let batch = [];
+    try { batch = await gatherUnsentDevisForSend(pid); } catch (e) { batch = []; }
+    if (batch.length >= 1) return openComposeDevisGrouped(batch, pInfo);
+    return openComposeDevisModal(devis, pInfo);
+  }
+
   // C2 : envoi groupé d'un lot d'import — 1 patient, 1 mail, tous les PDF, page agrégée.
   async function openComposeDevisGrouped(batch, patient) {
     const first = batch[0];
@@ -5437,8 +5456,8 @@ Bien cordialement,`;
       const f = document.getElementById('dcompose-pdf').files;
       if (groupCtx) {
         const _n = groupCtx.items.filter(it => it.pdf && it.pdf.base64).length + ((f && f[0]) ? 1 : 0);
-        pdfStatusEl.textContent = '✓ ' + _n + ' devis PDF joint(s) au mail groupé';
-        pdfStatusEl.className = 'text-[12px] mt-1 ml-1 text-success';
+        if (_n === 0) { pdfStatusEl.textContent = '⚠ Aucun PDF — le mail partira SANS le devis officiel.'; pdfStatusEl.className = 'text-[12px] mt-1 ml-1 text-danger'; }
+        else { pdfStatusEl.textContent = '✓ ' + _n + ' devis PDF joint' + (_n > 1 ? 's' : ''); pdfStatusEl.className = 'text-[12px] mt-1 ml-1 text-success'; }
         return;
       }
       if (f && f[0]) { pdfStatusEl.textContent = '✓ PDF joint : ' + f[0].name; pdfStatusEl.className = 'text-[12px] mt-1 ml-1 text-success'; }
