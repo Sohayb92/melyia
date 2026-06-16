@@ -282,6 +282,25 @@
         </div>
       </div>
 
+      <!-- Avis à envoyer card (E) — liste à valider -->
+      <div id="avis-section" class="hidden mb-6 animate-fade-up" style="animation-delay: 60ms">
+        <div class="bg-white border border-ink-200 rounded-2xl overflow-hidden">
+          <div class="px-5 py-3.5 flex items-center justify-between border-b border-ink-100">
+            <div class="flex items-center gap-2.5">
+              <div class="w-9 h-9 rounded-xl bg-success/12 flex items-center justify-center">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#34C759" stroke-width="2.2"><path d="M12 17.3l-5.4 3.3 1.5-6.2L3 10.2l6.3-.5L12 4l2.7 5.7 6.3.5-5.1 4.2 1.5 6.2z"/></svg>
+              </div>
+              <div>
+                <div class="text-[16px] font-semibold leading-tight">Avis à envoyer</div>
+                <div class="text-[13px] text-ink-500" id="avis-count-text">0 avis</div>
+              </div>
+            </div>
+            <button id="avis-send-all" class="btn btn-primary btn-sm !px-3">Tout envoyer</button>
+          </div>
+          <div id="avis-list" class="divide-y divide-ink-100"></div>
+        </div>
+      </div>
+
       <!-- Stats grid : 3 cards (Total retiré, redondant) -->
       <div class="grid grid-cols-3 gap-3 mb-6 mt-5">
         <span id="stat-total" class="hidden">0</span><span id="stat-total-amount" class="hidden">0 €</span>
@@ -1927,6 +1946,7 @@ Règles :
 
   let _importQueue = []; // import multi-devis : les PDF restants à traiter, l'un après l'autre
   let _importBatchPatient = null; // patient choisi sur le 1er devis du lot → réutilisé pour les suivants (anti-doublon)
+  let _importBatchDevis = []; // import multi-devis : {id, soins, soinsKeys, montant, notes, jeton, pdf} du lot, pour l'envoi groupe a la fin (C2)
   function processNextImport() { const f = _importQueue.shift(); if (f) importDevisFromPdf(f); }
 
   async function importDevisFromPdf(file) {
@@ -2057,9 +2077,9 @@ Règles :
       el.style.transition = 'all 0.25s';
       setTimeout(() => el.remove(), 250);
     };
-    confirmBtn.onclick = () => { cleanup(); if (onConfirm) onConfirm(); };
-    cancelBtn.onclick  = () => { cleanup(); if (onCancel) onCancel(); };
-    setTimeout(() => { if (!handled) { cleanup(); if (onCancel) onCancel(); } }, durationMs);
+    confirmBtn.onclick = () => { cleanup(); if (onConfirm) onConfirm('button'); };
+    cancelBtn.onclick  = () => { cleanup(); if (onCancel) onCancel('button'); };
+    setTimeout(() => { if (!handled) { cleanup(); if (onCancel) onCancel('timeout'); } }, durationMs);
   }
 
   function formatDate(d) {
@@ -2311,7 +2331,7 @@ Règles :
     const ii = document.getElementById('import-devis-input');
     if (ib && ii) {
       ib.addEventListener('click', () => ii.click());
-      ii.addEventListener('change', (e) => { const files = Array.from(e.target.files || []); e.target.value = ''; if (files.length) { _importQueue = files; _importBatchPatient = null; processNextImport(); } });
+      ii.addEventListener('change', (e) => { const files = Array.from(e.target.files || []); e.target.value = ''; if (files.length) { _importQueue = files; _importBatchPatient = null; _importBatchDevis = []; processNextImport(); } });
     }
   })();
   document.getElementById('open-new-btn-mobile').addEventListener('click', () => openModal());
@@ -2371,6 +2391,10 @@ Règles :
       data.created_at = new Date().toISOString();
       const _newDevisId = await db.devis.add(data);
       _proposeSendDevis = { devis: Object.assign({ id: _newDevisId }, data), patient: selectedPatientForDevis };
+      if (pendingDevisPdf || _importQueue.length || _importBatchPatient) {
+        // C2 : ce devis fait partie d'un lot d'import → on le mémorise (avec son PDF) pour l'envoi groupé
+        _importBatchDevis.push({ id: _newDevisId, soins: data.soins, soinsKeys: data.soinsKeys, montant: data.montant, notes: data.notes, jeton: data.jeton, pdf: pendingDevisPdf ? { name: pendingDevisPdf.name, base64: pendingDevisPdf.base64 } : null });
+      }
       toast('Devis enregistré', 'success');
     }
     closeModal();
@@ -2382,13 +2406,29 @@ Règles :
       _importBatchPatient = selectedPatientForDevis;
       toast('Devis enregistré · ' + _importQueue.length + ' à importer', 'info');
       setTimeout(processNextImport, 300);
+    } else if (_importBatchDevis.length >= 2) {
+      // C2 : fin d'un lot multi-devis → un seul mail groupé (tous les PDF + page agrégée)
+      const _batch = _importBatchDevis.slice();
+      const _grpPatient = _importBatchPatient || selectedPatientForDevis;
+      _importBatchDevis = []; _importBatchPatient = null;
+      if (_grpPatient && _grpPatient.email && GoogleAuth.isConnected()) {
+        setTimeout(() => {
+          toastConfirm('Lot de ' + _batch.length + ' devis enregistré. Envoyer un seul mail groupé au patient ?', {
+            confirmLabel: 'Envoyer le mail groupé',
+            onConfirm: () => openComposeDevisGrouped(_batch, _grpPatient)
+          });
+        }, 400);
+      }
     } else if (_proposeSendDevis && _proposeSendDevis.patient && _proposeSendDevis.patient.email && GoogleAuth.isConnected()) {
+      _importBatchDevis = [];
       setTimeout(() => {
         toastConfirm('Devis enregistré. L\'envoyer au patient maintenant ?', {
           confirmLabel: 'Envoyer le devis',
           onConfirm: () => openComposeDevisModal(_proposeSendDevis.devis, _proposeSendDevis.patient)
         });
       }, 400);
+    } else {
+      _importBatchDevis = [];
     }
     });
   });
@@ -2769,6 +2809,42 @@ Règles :
       });
     } else {
       maintSection.classList.add('hidden');
+    }
+
+    // Avis à envoyer (E) — soin terminé J+N + patients programmés ; validation manuelle (rien ne part tout seul)
+    const avisSection = document.getElementById('avis-section');
+    const _reviewReady = getSetting('googleReviewEnabled', '0') === '1' && !!getSetting('googleReviewUrl', '').trim() && GoogleAuth.isConnected();
+    let _avisItems = [];
+    if (_reviewReady) { try { _avisItems = await getReviewQueueItems(); } catch (e) { _avisItems = []; } }
+    if (_avisItems.length > 0) {
+      avisSection.classList.remove('hidden');
+      document.getElementById('avis-count-text').textContent = _avisItems.length + ' avis à envoyer';
+      const _mailSvg = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>';
+      document.getElementById('avis-list').innerHTML = _avisItems.map(it => `
+          <div class="px-4 py-3 flex items-center justify-between gap-3">
+            <div class="flex-1 min-w-0 cursor-pointer open-patient-from-avis" data-pid="${it.patient.id}">
+              <div class="text-[15px] font-semibold truncate">${esc(patientFullName(it.patient))}</div>
+              <div class="text-[13px] text-ink-500 truncate">${esc(it.label)}</div>
+            </div>
+            <button class="send-avis-btn btn btn-primary btn-sm !px-3" data-pid="${it.patient.id}" data-did="${it.devisId || ''}" title="Envoyer le mail d'avis">${_mailSvg}</button>
+          </div>`).join('');
+      document.querySelectorAll('.open-patient-from-avis').forEach(b => b.addEventListener('click', () => openPatientDetail(parseInt(b.dataset.pid))));
+      document.querySelectorAll('.send-avis-btn').forEach(b => b.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        b.disabled = true;
+        try { await sendReviewQueueItem(parseInt(b.dataset.pid), b.dataset.did ? parseInt(b.dataset.did) : null); toast('Mail d\'avis envoyé ✓', 'success'); scheduleAutoBackup(); renderDashboard(); }
+        catch (err) { toast('Erreur : ' + err.message, 'error'); b.disabled = false; }
+      }));
+      const _sendAll = document.getElementById('avis-send-all');
+      if (_sendAll) _sendAll.onclick = async () => {
+        _sendAll.disabled = true; _sendAll.textContent = 'Envoi…';
+        let ok = 0;
+        for (const it of _avisItems) { try { await sendReviewQueueItem(it.patient.id, it.devisId); ok++; } catch (e) {} }
+        toast(ok + ' mail' + (ok > 1 ? 's' : '') + ' d\'avis envoyé' + (ok > 1 ? 's' : '') + ' ✓', 'success');
+        scheduleAutoBackup(); renderDashboard();
+      };
+    } else {
+      avisSection.classList.add('hidden');
     }
 
     // Liste devis
@@ -3710,7 +3786,8 @@ Règles :
           toastConfirm(`✓ ${p.prenom} ${p.nom}. Créer son devis ?`, {
             confirmLabel: 'Créer le devis',
             cancelLabel: 'Plus tard',
-            onConfirm: () => openModal(null, p)
+            onConfirm: () => openModal(null, p),
+            onCancel: (src) => { if (src === 'button') maybeOfferReviewScheduling(p); }
           });
         }, 200);
       }
@@ -5276,7 +5353,22 @@ Bien cordialement,`;
   // ========================================
   // COMPOSE RELANCE MAIL (via Gmail)
   // ========================================
-  async function openComposeDevisModal(devis, pInfo) {
+  // C2 : envoi groupé d'un lot d'import — 1 patient, 1 mail, tous les PDF, page agrégée.
+  async function openComposeDevisGrouped(batch, patient) {
+    const first = batch[0];
+    const merged = {
+      id: first.id,
+      jeton: first.jeton,
+      soins: batch.map(b => b.soins).filter(Boolean).join(', '),
+      soinsKeys: [...new Set(batch.flatMap(b => Array.isArray(b.soinsKeys) ? b.soinsKeys : []))],
+      notes: batch.map(b => b.notes).filter(Boolean).join(' · '),
+      montant: batch.reduce((s, b) => s + (parseFloat(b.montant) || 0), 0)
+    };
+    const groupCtx = { items: batch.map(b => ({ id: b.id, pdf: b.pdf })) };
+    openComposeDevisModal(merged, patient, groupCtx);
+  }
+
+  async function openComposeDevisModal(devis, pInfo, groupCtx) {
     if (!pInfo || !pInfo.email) { toast('Pas d\'email pour ce patient', 'warning'); return; }
     if (pInfo.noContact === true) { toast(patientFullName(pInfo) + ' a demandé à ne plus être sollicité (STOP).', 'warning'); return; }
     if (!devis.jeton) { devis.jeton = makeJeton(); try { await db.devis.update(devis.id, { jeton: devis.jeton }); } catch (e) {} }
@@ -5343,6 +5435,12 @@ Bien cordialement,`;
     const pdfStatusEl = document.getElementById('dcompose-pdf-status');
     function refreshPdfStatus() {
       const f = document.getElementById('dcompose-pdf').files;
+      if (groupCtx) {
+        const _n = groupCtx.items.filter(it => it.pdf && it.pdf.base64).length + ((f && f[0]) ? 1 : 0);
+        pdfStatusEl.textContent = '✓ ' + _n + ' devis PDF joint(s) au mail groupé';
+        pdfStatusEl.className = 'text-[12px] mt-1 ml-1 text-success';
+        return;
+      }
       if (f && f[0]) { pdfStatusEl.textContent = '✓ PDF joint : ' + f[0].name; pdfStatusEl.className = 'text-[12px] mt-1 ml-1 text-success'; }
       else if (pendingDevisPdf && pendingDevisPdf.base64) { pdfStatusEl.textContent = "✓ Devis PDF attaché (depuis l'import) : " + (pendingDevisPdf.name || 'devis.pdf'); pdfStatusEl.className = 'text-[12px] mt-1 ml-1 text-success'; }
       else { pdfStatusEl.textContent = '⚠ Aucun PDF — le mail partira SANS le devis officiel.'; pdfStatusEl.className = 'text-[12px] mt-1 ml-1 text-danger'; }
@@ -5361,7 +5459,13 @@ Bien cordialement,`;
       sendBtn.disabled = true; const orig = sendBtn.textContent; sendBtn.textContent = 'Envoi…';
       try {
         let attachments = [];
-        if (file) {
+        if (groupCtx) {
+          attachments = groupCtx.items.filter(it => it.pdf && it.pdf.base64).map(it => ({ filename: it.pdf.name || 'devis.pdf', mimeType: 'application/pdf', dataB64: it.pdf.base64 }));
+          if (file) {
+            const dataB64 = await new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result).split(',')[1] || ''); r.onerror = rej; r.readAsDataURL(file); });
+            attachments.push({ filename: file.name || 'devis.pdf', mimeType: 'application/pdf', dataB64 });
+          }
+        } else if (file) {
           const dataB64 = await new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result).split(',')[1] || ''); r.onerror = rej; r.readAsDataURL(file); });
           attachments = [{ filename: file.name || 'devis.pdf', mimeType: 'application/pdf', dataB64 }];
         } else if (pendingDevisPdf && pendingDevisPdf.base64) {
@@ -5370,8 +5474,17 @@ Bien cordialement,`;
         const userEmailFresh = getSetting('googleUserEmail', '') || userEmail;
         await Gmail.sendEmail({ to, subject, body, from: doctorName && userEmailFresh ? `${doctorName} <${userEmailFresh}>` : '', attachments });
         const _att0 = attachments[0];
-        await db.devis.update(devis.id, Object.assign({ devisMailSentAt: new Date().toISOString() }, _att0 ? { pdfName: _att0.filename, pdfStored: true } : {}));
-        if (_att0) { try { await db.pdfs.where('devis_id').equals(devis.id).delete(); await db.pdfs.add({ devis_id: devis.id, name: _att0.filename, base64: _att0.dataB64 }); } catch (e) {} } // PDF hors table devis (perf)
+        const _nowSent = new Date().toISOString();
+        if (groupCtx) {
+          // C2 : marque TOUS les devis du lot comme envoyés + range chaque PDF dans la table pdfs
+          for (const it of groupCtx.items) {
+            await db.devis.update(it.id, Object.assign({ devisMailSentAt: _nowSent }, it.pdf ? { pdfName: it.pdf.name, pdfStored: true } : {}));
+            if (it.pdf && it.pdf.base64) { try { await db.pdfs.where('devis_id').equals(it.id).delete(); await db.pdfs.add({ devis_id: it.id, name: it.pdf.name, base64: it.pdf.base64 }); } catch (e) {} }
+          }
+        } else {
+          await db.devis.update(devis.id, Object.assign({ devisMailSentAt: _nowSent }, _att0 ? { pdfName: _att0.filename, pdfStored: true } : {}));
+          if (_att0) { try { await db.pdfs.where('devis_id').equals(devis.id).delete(); await db.pdfs.add({ devis_id: devis.id, name: _att0.filename, base64: _att0.dataB64 }); } catch (e) {} } // PDF hors table devis (perf)
+        }
         pendingDevisPdf = null;
         toast(attachments.length ? 'Devis envoyé (PDF joint) ✓' : 'Devis envoyé ✓ (sans PDF)', 'success');
         closeDetail();
@@ -5688,6 +5801,39 @@ Bien cordialement,`;
     });
   }
 
+  // E : items de la file d'avis à valider (soin terminé J+N + patients programmés échus), dédupliqués par patient.
+  async function getReviewQueueItems() {
+    const items = [];
+    const seen = new Set();
+    const devisCands = await getGoogleReviewCandidates();
+    for (const d of devisCands) {
+      const p = getCachedPatient(d.patient_id);
+      if (!p || seen.has(p.id)) continue;
+      seen.add(p.id);
+      items.push({ patient: p, devisId: d.id, label: (d.soins || 'soin terminé') });
+    }
+    const now = Date.now();
+    const pats = await db.patients.toArray();
+    for (const p of pats) {
+      if (seen.has(p.id)) continue;
+      if (!p.reviewScheduledAt || new Date(p.reviewScheduledAt).getTime() > now) continue;
+      if (!p.email || p.noContact === true || p.googleReviewSentManuallyAt) continue;
+      seen.add(p.id);
+      items.push({ patient: p, devisId: null, label: 'avis programmé' });
+    }
+    return items;
+  }
+
+  // E : envoie le mail d'avis pour un item de la file + marque comme envoyé (devis et/ou patient programmé).
+  async function sendReviewQueueItem(patientId, devisId) {
+    const p = getCachedPatient(patientId) || await db.patients.get(patientId);
+    if (!p) throw new Error('Patient introuvable');
+    const devisList = await db.devis.where('patient_id').equals(patientId).toArray();
+    await sendGoogleReviewToPatientManual(p, devisList);
+    if (devisId) { try { await db.devis.update(devisId, { googleReviewMailSent: true, googleReviewMailSentAt: new Date().toISOString() }); } catch (e) {} }
+    if (p.reviewScheduledAt) { try { await db.patients.update(patientId, { reviewScheduledAt: null }); } catch (e) {} }
+  }
+
   async function getGoogleReviewCandidates() {
     const delay = Math.max(1, parseInt(getSetting('googleReviewDelay', '14'), 10) || 14);
     const now = Date.now();
@@ -5726,6 +5872,28 @@ Bien cordialement,`;
   // v2.5.11 — Envoi mail avis Google manuel ciblé sur un patient (sans devis OU ancien patient).
   // Réutilise le template existant. Pour {{soins}} : prend le dernier devis soin terminé,
   // sinon "votre récent traitement" pour les patients sans devis associé.
+  // E : à la création d'un patient (sans devis), proposer la demande d'avis — maintenant ou programmée à J+delay.
+  function maybeOfferReviewScheduling(patient) {
+    if (!patient || !patient.email || patient.noContact === true) return;
+    if (getSetting('googleReviewEnabled', '0') !== '1' || !getSetting('googleReviewUrl', '').trim()) return;
+    if (!GoogleAuth.isConnected() || patient.googleReviewSentManuallyAt) return;
+    const delay = Math.max(1, parseInt(getSetting('googleReviewDelay', '14'), 10) || 14);
+    toastConfirm('Demande d\'avis Google pour ' + patientFullName(patient) + ' ?', {
+      confirmLabel: 'Envoyer maintenant',
+      cancelLabel: 'Programmer à J+' + delay,
+      durationMs: 15000,
+      onConfirm: async () => {
+        try { await sendGoogleReviewToPatientManual(patient, []); toast('Mail d\'avis envoyé ✓', 'success'); scheduleAutoBackup(); renderDashboard(); }
+        catch (e) { toast('Erreur : ' + e.message, 'error'); }
+      },
+      onCancel: async (src) => {
+        if (src !== 'button') return; // l'auto-fermeture ne programme rien
+        try { await db.patients.update(patient.id, { reviewScheduledAt: addDays(new Date(), delay) }); await refreshPatientsCache(); toast('Demande d\'avis programmée dans ' + delay + ' jours', 'success'); renderDashboard(); }
+        catch (e) { toast('Erreur : ' + e.message, 'error'); }
+      }
+    });
+  }
+
   async function sendGoogleReviewToPatientManual(patient, devisList) {
     if (!GoogleAuth.isConnected()) throw new Error('Connecte-toi à Google d\'abord (Réglages)');
     const reviewUrl = getSetting('googleReviewUrl', '').trim();
@@ -6316,7 +6484,7 @@ Bien cordialement,`;
     setTimeout(checkMorningDigest, 2000);
     setTimeout(checkDrivePull, 3000);
     setTimeout(suggestStaleDevisCleanup, 5000);
-    setTimeout(checkGoogleReviewQueue, 4000);
+    // E : plus d'envoi automatique des avis — ils se valident depuis la liste « Avis à envoyer » du dashboard.
     setTimeout(migratePdfsOnce, 2500); // migration PDF différée (best-effort : ne bloque jamais l'app)
     offerTemplatesMigrationV241();
   }
