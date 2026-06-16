@@ -4017,10 +4017,10 @@ Règles :
   // SETTINGS
   // ========================================
   const MAINTENANCE_TYPES = {
-    'paro': { label: 'Maintenance parodontale', defaultMonths: 6 },
-    'implant': { label: 'Suivi implants', defaultMonths: 6 },
-    'ortho': { label: 'Contrôle post-ortho', defaultMonths: 12 },
-    'controle': { label: 'Contrôle annuel', defaultMonths: 12 }
+    'paro': { label: 'Maintenance parodontale', defaultMonths: 6, conseil: 'Pensez à apporter votre brosse à dents électrique : nous en profiterons pour recalibrer ensemble vos brossettes interdentaires.' },
+    'implant': { label: 'Suivi implants', defaultMonths: 6, conseil: 'Ce contrôle nous permet de vérifier la bonne tenue de votre implant et la santé des tissus autour.' },
+    'ortho': { label: 'Contrôle post-ortho', defaultMonths: 12, conseil: '' },
+    'controle': { label: 'Contrôle annuel', defaultMonths: 12, conseil: '' }
   };
 
   const DEFAULT_MAINTENANCE_TEMPLATE = `{{salutation}},
@@ -4029,6 +4029,7 @@ J'espère que vous allez bien. Le moment approche pour votre prochaine séance d
 
 Ce suivi régulier est important : c'est lui qui permet de surveiller et d'entretenir dans la durée les soins que nous avons réalisés ensemble. Mon équipe et moi-même y tenons.
 
+{{conseil_maintenance}}
 Vous pouvez prendre rendez-vous directement en ligne :
 [[Prendre rendez-vous|{{lien_rdv}}]]
 ou nous appeler au 01 42 42 94 69.
@@ -5092,6 +5093,7 @@ Bien cordialement,`;
       .replaceAll('{{prenom}}', patient.prenom || '')
       .replaceAll('{{nom}}', patient.nom || '')
       .replaceAll('{{type_maintenance}}', typeLabel)
+      .replaceAll('{{conseil_maintenance}}', (MAINTENANCE_TYPES[maintenance.type] && MAINTENANCE_TYPES[maintenance.type].conseil) || '')
       .replaceAll('{{lien_rdv}}', DOCTOLIB_BOOKING_URL)
       .replaceAll('{{doctor}}', doctor);
 
