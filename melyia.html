@@ -1530,7 +1530,7 @@
   const UTM_RELANCE2 = 'utm_source=melyia&utm_medium=email&utm_campaign=relance2';
   const UTM_AVIS     = 'utm_source=melyia&utm_medium=email&utm_campaign=avis';
   const UTM_MAINT    = 'utm_source=melyia&utm_medium=email&utm_campaign=maintenance';
-  const DOCTOLIB_BOOKING_URL = 'https://www.doctolib.fr/dentiste/colombes/sohaib-kebieche-colombes';
+  const DOCTOLIB_BOOKING_URL = 'https://www.doctolib.fr/dentiste/colombes/sohaib-kebieche-colombes/booking/motives?specialityId=1&telehealth=false&placeId=practice-494254&source=profile';
 
   // Jeton opaque court (sans 0/O/1/l/I pour éviter toute ambiguïté de lecture).
   function makeJeton() {
@@ -2528,7 +2528,7 @@ Règles :
             <button class="action-btn btn btn-secondary w-full" data-action="vulgarize-logos">Générer le mail d'explication (Logos)</button>
             <button class="action-btn btn btn-secondary w-full" data-action="copier-lien-patient">Copier le lien page patient</button>
             ${devis.status === 'En attente' ? `<button class="action-btn btn btn-secondary w-full" data-action="relancer">Marquer relancé (sans mail)</button>` : ''}
-            ${devis.status === 'Relancé' ? `<button class="action-btn btn btn-secondary w-full" data-action="noresponse">Sans réponse</button>` : ''}
+            ${(devis.status === 'En attente' || devis.status === 'Relancé') ? `<button class="action-btn btn btn-secondary w-full" data-action="noresponse">Sans réponse</button>` : ''}
             <button id="delete-devis-btn" class="btn btn-secondary w-full" style="color:#FF3B30">Supprimer ce devis</button>
           </div>
         ` : `
@@ -4126,7 +4126,7 @@ Règles :
   // SETTINGS
   // ========================================
   const MAINTENANCE_TYPES = {
-    'paro': { label: 'Maintenance parodontale', defaultMonths: 6, suivi: "Ce suivi régulier est important : c'est lui qui permet de surveiller et d'entretenir dans la durée les soins que nous avons réalisés ensemble. Mon équipe et moi-même y tenons.", conseil: '[Entretenir vos gencives au quotidien : nos conseils →](https://drkebieche.fr/conseils/hygiene)' },
+    'paro': { label: 'Maintenance parodontale', defaultMonths: 6, suivi: "Ce suivi régulier est important : c'est lui qui permet de surveiller et d'entretenir dans la durée les soins que nous avons réalisés ensemble. Mon équipe et moi-même y tenons.", conseil: '[Entretenir vos gencives au quotidien : nos conseils →](https://drkebieche.fr/conseils/hygiene)', motif: 'Au moment de réserver, choisissez le motif « Maintenance parodontale » dans la liste.' },
     'implant': { label: 'Suivi implants', defaultMonths: 6, suivi: "Ce suivi régulier est important : c'est lui qui permet de surveiller et d'entretenir dans la durée les soins que nous avons réalisés ensemble. Mon équipe et moi-même y tenons.", conseil: "Ce contrôle nous permet de vérifier la bonne tenue de votre implant et la santé des tissus autour.\n\n[Bien entretenir vos implants au quotidien →](https://drkebieche.fr/conseils/maintenance-implants)" },
     'ortho': { label: 'Contrôle post-ortho', defaultMonths: 12, suivi: "Ce suivi régulier est important : c'est lui qui permet de surveiller et d'entretenir dans la durée les soins que nous avons réalisés ensemble. Mon équipe et moi-même y tenons.", conseil: '[Nos conseils pour un brossage efficace →](https://drkebieche.fr/conseils/hygiene)' },
     'controle': { label: 'Contrôle annuel', defaultMonths: 12, suivi: "Ce suivi régulier est important : il permet de surveiller et d'entretenir votre santé bucco-dentaire dans la durée. Mon équipe et moi-même y tenons.", conseil: '[Nos conseils pour un brossage efficace →](https://drkebieche.fr/conseils/hygiene)' }
@@ -4139,7 +4139,7 @@ J'espère que vous allez bien. Le moment approche pour votre prochaine séance d
 {{phrase_suivi}}{{conseil_maintenance}}
 
 Vous pouvez prendre rendez-vous directement en ligne :
-[[Prendre rendez-vous|{{lien_rdv}}]]
+{{motif_rdv}}[[Prendre rendez-vous|{{lien_rdv}}]]
 ou nous appeler au 01 42 42 94 69.
 
 Au plaisir de vous revoir au cabinet.
@@ -5157,6 +5157,61 @@ Bien cordialement,`;
   // ========================================
   // MAINTENANCE — envoi rappel via Gmail (modale dans modal-detail-overlay)
   // ========================================
+  // Migration : le template maintenance a gagné des placeholders (conseil, phrase_suivi, motif) + le deep-link Doctolib.
+  // Si l'utilisateur a sauvegardé un ancien template (sans ces marqueurs), on le réinitialise au défaut courant (silencieux).
+  function migrateMaintenanceTemplateNow() {
+    const saved = localStorage.getItem('melyia_maintenanceTemplate');
+    if (saved && saved.indexOf('{{motif_rdv}}') === -1) setSetting('maintenanceTemplate', DEFAULT_MAINTENANCE_TEMPLATE);
+  }
+
+  // Envoi auto d'un rappel maintenance (même contenu que la modale, sans interface).
+  async function sendMaintenanceReminderAuto(maintenance, patient) {
+    if (!GoogleAuth.isConnected() || !patient || !patient.email || patient.noContact === true) return false;
+    let template = getSetting('maintenanceTemplate', DEFAULT_MAINTENANCE_TEMPLATE);
+    if (!template.includes('{{motif_rdv}}')) template = DEFAULT_MAINTENANCE_TEMPLATE;
+    const t = MAINTENANCE_TYPES[maintenance.type] || {};
+    const typeLabel = (t.label || maintenance.type).toLowerCase();
+    const doctor = (getSetting('doctorName', '') || '').trim() || 'Votre dentiste';
+    const userEmail = getSetting('googleUserEmail', '');
+    const body = template
+      .replaceAll('{{salutation}}', buildSalutation(patient))
+      .replaceAll('{{civilite}}', titreOf(patient))
+      .replaceAll('{{titre}}', titreOf(patient))
+      .replaceAll('{{prenom}}', patient.prenom || '')
+      .replaceAll('{{nom}}', patient.nom || '')
+      .replaceAll('{{type_maintenance}}', typeLabel)
+      .replaceAll('{{phrase_suivi}}', t.suivi || "Ce suivi régulier est important : il permet de surveiller et d'entretenir votre santé bucco-dentaire dans la durée. Mon équipe et moi-même y tenons.")
+      .replaceAll('{{conseil_maintenance}}', t.conseil ? '\n\n' + t.conseil : '')
+      .replaceAll('{{motif_rdv}}', t.motif ? t.motif + '\n' : '')
+      .replaceAll('{{lien_rdv}}', DOCTOLIB_BOOKING_URL)
+      .replaceAll('{{doctor}}', doctor);
+    const subject = 'Rappel de votre visite de suivi';
+    await Gmail.sendEmail({ to: patient.email, subject, body, from: doctor && userEmail ? doctor + ' <' + userEmail + '>' : '' });
+    await db.rappels_maintenance.add({ maintenance_id: maintenance.id, date: new Date().toISOString(), subject, body });
+    await snoozeMaintenanceFromToday(maintenance.id);
+    return true;
+  }
+
+  // Au démarrage : envoie automatiquement les rappels maintenance arrivés à échéance (1x/jour).
+  async function autoSendDueMaintenances() {
+    if (!GoogleAuth.isConnected()) return;
+    const today = new Date().toISOString().slice(0, 10);
+    if (getSetting('lastMaintAutoSendDate', '') === today) return;
+    try { await refreshPatientsCache(); } catch (e) {}
+    let due = [];
+    try { due = await getMaintenancesDues(); } catch (e) { return; }
+    let sent = 0;
+    for (const m of due) {
+      try {
+        const p = getCachedPatient(m.patient_id) || await db.patients.get(m.patient_id);
+        if (!p || !p.email || p.noContact === true) continue;
+        if (await sendMaintenanceReminderAuto(m, p)) sent++;
+      } catch (e) {}
+    }
+    setSetting('lastMaintAutoSendDate', today);
+    if (sent > 0) { toast(sent + ' rappel' + (sent > 1 ? 's' : '') + ' de suivi envoyé' + (sent > 1 ? 's' : '') + ' automatiquement ✓', 'success'); renderDashboard(); scheduleAutoBackup(); }
+  }
+
   async function openComposeMaintenanceModal(maintenance, patient) {
     if (!GoogleAuth.isConnected()) {
       toast('Connecte-toi à Google d\'abord (Réglages)', 'warning');
@@ -5171,7 +5226,8 @@ Bien cordialement,`;
       toast(`${patientFullName(patient)} a demandé à ne plus être sollicité (STOP). Maintenance annulée.`, 'warning');
       return;
     }
-    const template = getSetting('maintenanceTemplate', DEFAULT_MAINTENANCE_TEMPLATE);
+    let template = getSetting('maintenanceTemplate', DEFAULT_MAINTENANCE_TEMPLATE);
+    if (!template.includes('{{motif_rdv}}')) template = DEFAULT_MAINTENANCE_TEMPLATE; // template périmé (sauvegardé avant) -> défaut à jour
     const typeLabel = MAINTENANCE_TYPES[maintenance.type]?.label?.toLowerCase() || maintenance.type;
     const doctor = (getSetting('doctorName', '') || '').trim() || 'Votre dentiste';
     const userEmail = getSetting('googleUserEmail', '');
@@ -5184,6 +5240,7 @@ Bien cordialement,`;
       .replaceAll('{{type_maintenance}}', typeLabel)
       .replaceAll('{{phrase_suivi}}', (MAINTENANCE_TYPES[maintenance.type] && MAINTENANCE_TYPES[maintenance.type].suivi) || "Ce suivi régulier est important : il permet de surveiller et d'entretenir votre santé bucco-dentaire dans la durée. Mon équipe et moi-même y tenons.")
       .replaceAll('{{conseil_maintenance}}', (MAINTENANCE_TYPES[maintenance.type] && MAINTENANCE_TYPES[maintenance.type].conseil) ? '\n\n' + MAINTENANCE_TYPES[maintenance.type].conseil : '')
+      .replaceAll('{{motif_rdv}}', (MAINTENANCE_TYPES[maintenance.type] && MAINTENANCE_TYPES[maintenance.type].motif) ? MAINTENANCE_TYPES[maintenance.type].motif + '\n' : '')
       .replaceAll('{{lien_rdv}}', DOCTOLIB_BOOKING_URL)
       .replaceAll('{{doctor}}', doctor);
 
@@ -6506,6 +6563,8 @@ Bien cordialement,`;
     // E : plus d'envoi automatique des avis — ils se valident depuis la liste « Avis à envoyer » du dashboard.
     setTimeout(migratePdfsOnce, 2500); // migration PDF différée (best-effort : ne bloque jamais l'app)
     offerTemplatesMigrationV241();
+    migrateMaintenanceTemplateNow();
+    setTimeout(autoSendDueMaintenances, 4500);
   }
 
   init();
