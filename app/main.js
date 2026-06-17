@@ -323,6 +323,66 @@ ipcMain.handle('extract-pdf-text', async (e, base64) => {
   }
 });
 
+// ── Dossier surveillé : auto-import des devis PDF ───────────────────────────
+// Scan toutes les 12 s. Un PDF stable depuis >3 s est lu, DÉPLACÉ dans `_importés/`
+// (anti-doublon + safe multi-PC si dossier synchronisé), puis envoyé au renderer.
+let watchTimer = null;
+let watchFolder = null;
+const WATCH_INTERVAL_MS = 12000;
+const WATCH_DONE_DIR = '_importés';
+
+function moveToImported(folder, filePath, fileName) {
+  const doneDir = path.join(folder, WATCH_DONE_DIR);
+  try { fs.mkdirSync(doneDir, { recursive: true }); } catch (e) {}
+  let dest = path.join(doneDir, fileName);
+  if (fs.existsSync(dest)) {
+    const ext = path.extname(fileName);
+    dest = path.join(doneDir, path.basename(fileName, ext) + '-' + Date.now() + ext);
+  }
+  fs.renameSync(filePath, dest);
+}
+
+function scanWatchFolder() {
+  if (!watchFolder || !mainWindow || mainWindow.isDestroyed()) return;
+  let entries;
+  try { entries = fs.readdirSync(watchFolder, { withFileTypes: true }); } catch (e) { return; }
+  const now = Date.now();
+  for (const ent of entries) {
+    if (!ent.isFile() || !/\.pdf$/i.test(ent.name)) continue;
+    const fp = path.join(watchFolder, ent.name);
+    let st;
+    try { st = fs.statSync(fp); } catch (e) { continue; }
+    if (now - st.mtimeMs < 3000) continue; // fichier peut-être encore en cours de copie
+    let base64;
+    try { base64 = fs.readFileSync(fp).toString('base64'); } catch (e) { continue; }
+    try { moveToImported(watchFolder, fp, ent.name); } catch (e) { continue; } // si le déplacement échoue, on réessaiera (pas de double envoi)
+    try { mainWindow.webContents.send('watched-devis', { name: ent.name, base64 }); } catch (e) {}
+  }
+}
+
+function startWatchFolder(folder) {
+  stopWatchFolder();
+  if (!folder) return false;
+  try { if (!fs.statSync(folder).isDirectory()) return false; } catch (e) { return false; }
+  watchFolder = folder;
+  setTimeout(scanWatchFolder, 1500); // premier scan peu après le démarrage
+  watchTimer = setInterval(scanWatchFolder, WATCH_INTERVAL_MS);
+  return true;
+}
+
+function stopWatchFolder() {
+  if (watchTimer) { clearInterval(watchTimer); watchTimer = null; }
+  watchFolder = null;
+}
+
+ipcMain.handle('pick-watch-folder', async () => {
+  const res = await dialog.showOpenDialog(mainWindow, { properties: ['openDirectory'], title: 'Dossier surveillé pour les devis' });
+  if (res.canceled || !res.filePaths || !res.filePaths.length) return null;
+  return res.filePaths[0];
+});
+ipcMain.handle('start-watch-folder', (e, folder) => startWatchFolder(folder));
+ipcMain.handle('stop-watch-folder', () => { stopWatchFolder(); return true; });
+
 // Auto-launch Windows
 ipcMain.handle('get-auto-launch', () => {
   return app.getLoginItemSettings().openAtLogin;
@@ -632,6 +692,7 @@ app.on('before-quit', () => {
 });
 
 app.on('will-quit', () => {
+  stopWatchFolder();
   globalShortcut.unregisterAll();
   if (tray) {
     tray.destroy();

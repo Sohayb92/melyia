@@ -45,5 +45,11 @@ contextBridge.exposeInMainWorld('melyiaElectron', {
   installUpdateNow: () => ipcRenderer.invoke('install-update-now'),
   onUpdateStatus: (callback) => {
     ipcRenderer.on('update-status', (_, payload) => callback(payload));
-  }
+  },
+
+  // Dossier surveillé (auto-import des devis PDF)
+  pickWatchFolder: () => ipcRenderer.invoke('pick-watch-folder'),
+  startWatchFolder: (folder) => ipcRenderer.invoke('start-watch-folder', folder),
+  stopWatchFolder: () => ipcRenderer.invoke('stop-watch-folder'),
+  onWatchedDevis: (callback) => { ipcRenderer.on('watched-devis', (_, data) => callback(data)); }
 });

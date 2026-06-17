@@ -739,6 +739,17 @@
             <span class="switch-slider"></span>
           </label>
         </div>
+        <div class="grouped-row" id="setting-watch-folder-row" style="display:none">
+          <div class="flex-1 min-w-0">
+            <div class="text-[15px] font-medium">Dossier surveillé (auto-import devis)</div>
+            <div class="text-[13px] text-ink-500 mt-0.5">Tout PDF déposé dans ce dossier est importé automatiquement (puis déplacé dans « _importés/ »). L'import manuel reste disponible.</div>
+            <div class="text-[12px] text-ink-600 mt-1 break-all" id="setting-watch-folder-path">Aucun dossier</div>
+          </div>
+          <div class="flex flex-col gap-1.5 flex-shrink-0">
+            <button type="button" id="setting-watch-folder-pick" class="btn btn-secondary btn-sm">Choisir…</button>
+            <button type="button" id="setting-watch-folder-clear" class="btn btn-secondary btn-sm">Désactiver</button>
+          </div>
+        </div>
       </div>
 
       <div class="mb-2 px-1 text-[12px] uppercase tracking-wider text-ink-500 font-semibold">Avis Google auto</div>
@@ -4427,6 +4438,8 @@ Bien cordialement,`;
     if (window.melyiaElectron) {
       document.getElementById('setting-auto-launch-row').style.display = '';
       document.getElementById('setting-system-notif-row').style.display = '';
+      document.getElementById('setting-watch-folder-row').style.display = '';
+      document.getElementById('setting-watch-folder-path').textContent = getSetting('watchFolderPath', '') || 'Aucun dossier';
       document.getElementById('setting-system-notif').checked = getSetting('systemNotifEnabled', '1') === '1';
       window.melyiaElectron.getAutoLaunch().then(enabled => {
         document.getElementById('setting-auto-launch').checked = !!enabled;
@@ -4475,6 +4488,27 @@ Bien cordialement,`;
     toast('Enregistré', 'success');
     setGreeting();
   });
+
+  // Dossier surveillé (auto-import) — Electron only ; inerte sur le web (window.melyiaElectron absent)
+  (function wireWatchFolder() {
+    const pick = document.getElementById('setting-watch-folder-pick');
+    const clear = document.getElementById('setting-watch-folder-clear');
+    if (pick) pick.addEventListener('click', async () => {
+      if (!window.melyiaElectron || !window.melyiaElectron.pickWatchFolder) return;
+      const folder = await window.melyiaElectron.pickWatchFolder();
+      if (!folder) return;
+      setSetting('watchFolderPath', folder);
+      document.getElementById('setting-watch-folder-path').textContent = folder;
+      const ok = await window.melyiaElectron.startWatchFolder(folder);
+      toast(ok ? 'Dossier surveillé activé ✓' : 'Dossier inaccessible', ok ? 'success' : 'error');
+    });
+    if (clear) clear.addEventListener('click', async () => {
+      setSetting('watchFolderPath', '');
+      document.getElementById('setting-watch-folder-path').textContent = 'Aucun dossier';
+      if (window.melyiaElectron && window.melyiaElectron.stopWatchFolder) await window.melyiaElectron.stopWatchFolder();
+      toast('Surveillance désactivée', 'info');
+    });
+  })();
 
   // Bouton "Envoyer le récap maintenant (test)" — force l'envoi même si déjà envoyé aujourd'hui
   const testDigestBtn = document.getElementById('test-morning-digest-btn');
@@ -6200,6 +6234,31 @@ Bien cordialement,`;
         setTimeout(() => openVulgarizeModal(), 120);
       }
     });
+
+    // Dossier surveillé : un PDF déposé est injecté dans la file d'import (modale de vérif habituelle)
+    if (window.melyiaElectron.onWatchedDevis) {
+      let _watchKick = null;
+      const _kickWatchImport = () => {
+        clearTimeout(_watchKick);
+        _watchKick = setTimeout(() => {
+          const busy = !document.getElementById('modal-form-overlay').classList.contains('hidden')
+                    || !document.getElementById('modal-detail-overlay').classList.contains('hidden');
+          if (!busy && _importQueue.length) processNextImport();
+        }, 600);
+      };
+      window.melyiaElectron.onWatchedDevis(({ name, base64 }) => {
+        try {
+          const bin = atob(base64);
+          const arr = new Uint8Array(bin.length);
+          for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+          _importQueue.push(new File([arr], name || 'devis.pdf', { type: 'application/pdf' }));
+          toast('Nouveau devis détecté : ' + (name || 'devis.pdf'), 'info');
+          _kickWatchImport();
+        } catch (e) { toast('Devis surveillé illisible : ' + e.message, 'error'); }
+      });
+      const _wf = getSetting('watchFolderPath', '');
+      if (_wf && window.melyiaElectron.startWatchFolder) window.melyiaElectron.startWatchFolder(_wf).catch(() => {});
+    }
 
     // Erreur de capture
     window.melyiaElectron.onCaptureError((msg) => {
