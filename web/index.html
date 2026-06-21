@@ -720,6 +720,16 @@
             <span class="switch-slider"></span>
           </label>
         </div>
+        <div class="grouped-row">
+          <div class="flex-1">
+            <div class="text-[15px] font-medium">📤 Poste émetteur (envois auto)</div>
+            <div class="text-[13px] text-ink-500 mt-0.5">À activer sur UN SEUL poste (ex. l'ordinateur du cabinet) : lui seul envoie les rappels automatiques et affiche les relances dues. Les autres ordis restent en consultation — évite les doublons de mails.</div>
+          </div>
+          <label class="switch flex-shrink-0">
+            <input type="checkbox" id="setting-sender-device"/>
+            <span class="switch-slider"></span>
+          </label>
+        </div>
         <div class="grouped-row" id="setting-auto-launch-row" style="display:none">
           <div class="flex-1">
             <div class="text-[15px] font-medium">Démarrer avec Windows</div>
@@ -1361,6 +1371,9 @@
   function setSetting(key, value) {
     localStorage.setItem('melyia_' + key, value);
   }
+
+  // Poste émetteur : seul ce poste déclenche les envois/rappels auto (évite les doublons multi-ordi).
+  function isSenderDevice() { return getSetting('senderDevice', '0') === '1'; }
 
   // Clés de localStorage à NE JAMAIS inclure dans les exports JSON ou les backups Drive.
   // Le ClientId reste exportable (c'est un identifiant public OAuth, pas un secret).
@@ -4404,6 +4417,7 @@ Bien cordialement,`;
     document.getElementById('setting-maintenance-template').value = getSetting('maintenanceTemplate', DEFAULT_MAINTENANCE_TEMPLATE);
     document.getElementById('setting-morning-digest').checked = getSetting('morningDigestEnabled', '0') === '1';
     document.getElementById('setting-auto-backup').checked = getSetting('autoBackupEnabled', '0') === '1';
+    document.getElementById('setting-sender-device').checked = getSetting('senderDevice', '0') === '1';
     document.getElementById('setting-google-review-enabled').checked = getSetting('googleReviewEnabled', '0') === '1';
     document.getElementById('setting-google-review-url').value = getSetting('googleReviewUrl', '');
     document.getElementById('setting-google-review-delay').value = getSetting('googleReviewDelay', '14');
@@ -4452,6 +4466,7 @@ Bien cordialement,`;
     setSetting('maintenanceTemplate', document.getElementById('setting-maintenance-template').value);
     setSetting('morningDigestEnabled', document.getElementById('setting-morning-digest').checked ? '1' : '0');
     setSetting('autoBackupEnabled', document.getElementById('setting-auto-backup').checked ? '1' : '0');
+    setSetting('senderDevice', document.getElementById('setting-sender-device').checked ? '1' : '0');
     setSetting('systemNotifEnabled', document.getElementById('setting-system-notif').checked ? '1' : '0');
     setSetting('googleReviewEnabled', document.getElementById('setting-google-review-enabled').checked ? '1' : '0');
     setSetting('googleReviewUrl', document.getElementById('setting-google-review-url').value.trim());
@@ -4677,6 +4692,7 @@ Bien cordialement,`;
   // STARTUP NOTIFICATION
   // ========================================
   async function checkRelancesOnStartup() {
+    if (!isSenderDevice()) return; // notifs de relance uniquement sur le poste émetteur
     await refreshPatientsCache();
     const all = await db.devis.toArray();
     const now = Date.now();
@@ -5225,6 +5241,7 @@ Bien cordialement,`;
 
   // Au démarrage : envoie automatiquement les rappels maintenance arrivés à échéance (1x/jour).
   async function autoSendDueMaintenances() {
+    if (!isSenderDevice()) return; // seul le poste émetteur envoie les rappels auto
     if (!GoogleAuth.isConnected()) return;
     const today = new Date().toISOString().slice(0, 10);
     if (getSetting('lastMaintAutoSendDate', '') === today) return;
@@ -5797,6 +5814,7 @@ Bien cordialement,`;
   // pour permettre un test manuel depuis Réglages
   async function checkMorningDigest(opts = {}) {
     const force = !!opts.force;
+    if (!force && !isSenderDevice()) return { skipped: 'not sender device' };
     if (!force && getSetting('morningDigestEnabled', '0') !== '1') return { skipped: 'morningDigestEnabled is OFF' };
     if (!GoogleAuth.isConnected()) {
       if (force) toast('Connecte-toi à Google d\'abord', 'warning');
