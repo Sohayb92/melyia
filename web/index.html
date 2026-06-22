@@ -213,7 +213,6 @@
       <div class="text-[15px] font-semibold tracking-tight text-ink-900">Melyia</div>
       <nav class="flex items-center gap-0.5">
         <a class="nav-link active" data-view="dashboard">Cabinet</a>
-        <a class="nav-link" data-view="patients">Patients</a>
         <a class="nav-link" data-view="stats">Activité</a>
         <a class="nav-link" data-view="settings">Réglages</a>
         <div class="relative ml-2">
@@ -341,13 +340,25 @@
         </div>
       </div>
 
-      <!-- Devis list -->
-      <div class="mb-3 px-1 flex items-center justify-between gap-3">
-        <h2 class="text-[18px] font-semibold tracking-tight">Devis</h2>
-        <input id="filter-search" type="text" placeholder="Rechercher..." class="input !h-9 !text-sm w-44 md:w-52"/>
+      <!-- Cabinet list (devis ou patients) -->
+      <div class="mb-3 px-1 flex items-center justify-between gap-3 flex-wrap">
+        <div class="flex items-center gap-2.5 min-w-0">
+          <h2 class="text-[18px] font-semibold tracking-tight" id="cabinet-list-title">Devis</h2>
+          <div class="segmented !p-0.5" id="cabinet-view-toggle">
+            <div class="segmented-item active !text-[13px] !px-3 !py-1" data-cabview="liste">Liste</div>
+            <div class="segmented-item !text-[13px] !px-3 !py-1" data-cabview="patients">Par patient</div>
+          </div>
+        </div>
+        <div class="flex items-center gap-2">
+          <button id="cabinet-add-patient-btn" class="btn btn-secondary btn-sm hidden">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            Patient
+          </button>
+          <input id="filter-search" type="text" placeholder="Rechercher..." class="input !h-9 !text-sm w-40 md:w-52"/>
+        </div>
       </div>
 
-      <div class="mb-3">
+      <div class="mb-3" id="cabinet-filters">
         <div class="segmented" role="tablist" id="status-filter">
           <div class="segmented-item active" data-status="">Tous</div>
           <div class="segmented-item" data-status="En attente"><span class="hidden sm:inline">En attente</span><span class="sm:hidden">Attente</span></div>
@@ -881,14 +892,10 @@
   </button>
 
   <!-- Bottom tab bar (mobile) -->
-  <nav class="md:hidden fixed bottom-0 inset-x-0 z-30 bg-white/90 backdrop-blur-xl border-t border-ink-200 grid grid-cols-4 h-[68px] pb-safe">
+  <nav class="md:hidden fixed bottom-0 inset-x-0 z-30 bg-white/90 backdrop-blur-xl border-t border-ink-200 grid grid-cols-3 h-[68px] pb-safe">
     <button class="tab-link active" data-view="dashboard">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
       <span>Cabinet</span>
-    </button>
-    <button class="tab-link" data-view="patients">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-      <span>Patients</span>
     </button>
     <button class="tab-link" data-view="stats">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
@@ -2736,6 +2743,7 @@ Règles :
   let currentFilterStatus = '';
   let currentNonSignesSubFilter = 'all';
   let currentSearch = '';
+  let currentCabinetView = 'liste'; // P1-C C2 : 'liste' (devis) | 'patients' (regroupé)
 
   async function renderDashboard() {
     // P1-A : un seul snapshot {patients, devis, maintenances} par render → filtres purs (7 lectures DB → 3)
@@ -2918,6 +2926,20 @@ Règles :
       avisSection.classList.add('hidden');
     }
 
+    // P1-C C2 — toggle "Liste / Par patient" : sync de l'UI + bascule du contenu de la liste
+    const _isPatientsView = currentCabinetView === 'patients';
+    const _cabTitle = document.getElementById('cabinet-list-title');
+    if (_cabTitle) _cabTitle.textContent = _isPatientsView ? 'Patients' : 'Devis';
+    const _cabFilters = document.getElementById('cabinet-filters');
+    if (_cabFilters) _cabFilters.classList.toggle('hidden', _isPatientsView);
+    const _cabAddPat = document.getElementById('cabinet-add-patient-btn');
+    if (_cabAddPat) _cabAddPat.classList.toggle('hidden', !_isPatientsView);
+    document.querySelectorAll('#cabinet-view-toggle .segmented-item').forEach(it => it.classList.toggle('active', it.dataset.cabview === currentCabinetView));
+    if (_isPatientsView) {
+      renderCabinetPatients(document.getElementById('devis-list'), all, allPatients);
+      return;
+    }
+
     // Liste devis
     // Tri DESC par date_envoi avec tiebreaker created_at DESC (sinon ordre instable quand même jour)
     let filtered = all.slice().sort((a, b) => {
@@ -3054,6 +3076,58 @@ Règles :
       });
     });
   }
+
+  // P1-C C2 — vue "Par patient" dans Cabinet : regroupe les devis par patient (depuis le snapshot, 0 lecture DB)
+  function renderCabinetPatients(listEl, devis, patients) {
+    const statsByPatient = new Map();
+    for (const d of devis) {
+      const pid = d.patient_id;
+      if (!pid) continue;
+      if (!statsByPatient.has(pid)) statsByPatient.set(pid, { count: 0, total: 0, lastDate: 0 });
+      const s = statsByPatient.get(pid);
+      s.count++; s.total += d.montant || 0;
+      const dt = new Date(d.date_envoi).getTime();
+      if (dt > s.lastDate) s.lastDate = dt;
+    }
+    const q = (currentSearch || '').toLowerCase().trim();
+    let pats = patients.slice();
+    if (q) pats = pats.filter(p => ((p.nom || '') + ' ' + (p.prenom || '') + ' ' + (p.email || '') + ' ' + (p.telephone || '')).toLowerCase().includes(q));
+    pats.sort((a, b) => {
+      const da = (statsByPatient.get(a.id) && statsByPatient.get(a.id).lastDate) || new Date(a.created_at).getTime() || 0;
+      const dbb = (statsByPatient.get(b.id) && statsByPatient.get(b.id).lastDate) || new Date(b.created_at).getTime() || 0;
+      if (da !== dbb) return dbb - da;
+      return (a.nom || '').localeCompare(b.nom || '');
+    });
+    if (pats.length === 0) {
+      listEl.innerHTML = `<div class="px-6 py-12 text-center text-ink-500 text-[14px]">${patients.length === 0 ? 'Aucun patient pour l\'instant.' : 'Aucun patient ne correspond.'}</div>`;
+      return;
+    }
+    listEl.innerHTML = pats.map(p => {
+      const s = statsByPatient.get(p.id) || { count: 0, total: 0, lastDate: 0 };
+      const initials = ((p.prenom || '?')[0] + (p.nom || '?')[0]).toUpperCase();
+      return `
+        <div class="list-row open-patient-btn" data-id="${p.id}">
+          <div class="flex items-center justify-between gap-3">
+            <div class="flex items-center gap-3 flex-1 min-w-0">
+              <div class="w-10 h-10 rounded-full bg-ink-100 flex items-center justify-center text-[13px] font-semibold text-ink-700 flex-shrink-0">${esc(initials)}</div>
+              <div class="flex-1 min-w-0">
+                <div class="text-[15px] font-semibold truncate">${esc(patientFullName(p))}</div>
+                <div class="text-[13px] text-ink-500 mt-0.5 truncate">
+                  ${s.count > 0 ? `${s.count} devis · ${fmtMoney(s.total)}` : 'Aucun devis'}${s.lastDate ? ' · ' + timeAgo(new Date(s.lastDate).toISOString()) : ''}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>`;
+    }).join('');
+    listEl.querySelectorAll('.open-patient-btn').forEach(b => b.addEventListener('click', () => openPatientDetail(parseInt(b.dataset.id))));
+  }
+
+  // P1-C C2 — toggle Liste / Par patient (Cabinet) + bouton "+ Patient" (visible en mode patients)
+  document.querySelectorAll('#cabinet-view-toggle .segmented-item').forEach(item => {
+    item.addEventListener('click', () => { currentCabinetView = item.dataset.cabview; renderDashboard(); });
+  });
+  (function () { const b = document.getElementById('cabinet-add-patient-btn'); if (b) b.addEventListener('click', () => openPatientModal()); })();
 
   function updateNonSignesChipsUI() {
     document.querySelectorAll('.non-signes-chip').forEach(chip => {
@@ -4180,7 +4254,7 @@ Règles :
         toast('Patient et tout son historique supprimés', 'info');
         closeDetail();
         await refreshPatientsCache();
-        renderPatients();
+        renderDashboard(); // P1-C : rafraîchit le Cabinet (vue Par patient incluse)
         if (typeof scheduleAutoBackup === 'function') scheduleAutoBackup();
       } catch (e) {
         toast('Erreur suppression : ' + e.message, 'error');
@@ -6283,7 +6357,7 @@ Bien cordialement,`;
           navigate('settings');
           return;
         }
-        navigate('patients');
+        navigate('dashboard'); // P1-C : plus d'onglet Patients ; la modale s'ouvre par-dessus le Cabinet
         setTimeout(() => {
           openPatientModal();
           setTimeout(() => showPatientCaptureImage(file), 400);
@@ -6299,7 +6373,7 @@ Bien cordialement,`;
         navigate('dashboard');
         setTimeout(() => openModal(), 120);
       } else if (type === 'patient') {
-        navigate('patients');
+        navigate('dashboard'); // P1-C : modale patient par-dessus le Cabinet
         setTimeout(() => openPatientModal(), 120);
       } else if (type === 'vulgarize') {
         setTimeout(() => openVulgarizeModal(), 120);
