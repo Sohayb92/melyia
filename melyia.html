@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <meta name="theme-color" content="#FAFAFA">
+  <meta name="theme-color" content="#FBFAF7">
   <!-- VAGUE 3 sécurité : Content-Security-Policy stricte -->
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: https:; connect-src 'self' https://generativelanguage.googleapis.com https://*.googleapis.com https://oauth2.googleapis.com https://accounts.google.com https://drkebieche.fr; frame-src 'none'; object-src 'none'; base-uri 'self';">
   <title>Melyia</title>
@@ -30,13 +30,13 @@
               300: '#C7C7CC',
               200: '#E5E5EA',
               100: '#F2F2F7',
-              50:  '#FAFAFA',
+              50:  '#FBFAF7',
             },
             accent: {
-              DEFAULT: '#0A84FF',
-              hover: '#0070E0',
+              DEFAULT: '#1F3A3D',
+              hover: '#163033',
             },
-            success: '#30D158',
+            success: '#2E7D5B',
             warning: '#FF9F0A',
             danger: '#FF3B30',
           },
@@ -83,7 +83,7 @@
     }
     @keyframes slideDown { from { opacity: 0; transform: translate(-50%, -16px); } to { opacity: 1; transform: translate(-50%, 0); } }
     .toast-info { background: rgba(28,28,30,0.92); color: #fff; }
-    .toast-success { background: rgba(48,209,88,0.95); color: #fff; }
+    .toast-success { background: rgba(46,125,91,0.95); color: #fff; }
     .toast-error { background: rgba(255,59,48,0.95); color: #fff; }
     .toast-warning { background: rgba(255,159,10,0.95); color: #fff; }
 
@@ -92,8 +92,8 @@
     .badge::before { content: ''; width: 6px; height: 6px; border-radius: 9999px; background: currentColor; opacity: 0.9; }
     .badge-pending { background: rgba(255,159,10,0.12); color: #B25C00; }
     .badge-relance { background: rgba(255,59,48,0.12); color: #C9251D; }
-    .badge-relanced { background: rgba(10,132,255,0.12); color: #0060CC; }
-    .badge-accepted { background: rgba(48,209,88,0.15); color: #137A33; }
+    .badge-relanced { background: rgba(31,58,61,0.12); color: #1F3A3D; }
+    .badge-accepted { background: rgba(46,125,91,0.15); color: #137A33; }
     .badge-refused { background: rgba(142,142,147,0.18); color: #48484A; }
     .badge-noresponse { background: rgba(175,82,222,0.14); color: #7029A0; }
 
@@ -101,22 +101,22 @@
     .btn { height: 44px; padding: 0 20px; border-radius: 12px; font-weight: 600; font-size: 16px; display: inline-flex; align-items: center; justify-content: center; gap: 8px; transition: all 200ms cubic-bezier(0.32, 0.72, 0, 1); user-select: none; }
     .btn:active:not(:disabled) { transform: scale(0.97); }
     .btn:disabled { opacity: 0.4; cursor: not-allowed; }
-    .btn-primary { background: #0A84FF; color: #fff; box-shadow: 0 1px 2px rgba(10,132,255,0.18); }
-    .btn-primary:hover:not(:disabled) { background: #0070E0; }
+    .btn-primary { background: #1F3A3D; color: #fff; box-shadow: 0 1px 2px rgba(31,58,61,0.18); }
+    .btn-primary:hover:not(:disabled) { background: #163033; }
     .btn-secondary { background: #F2F2F7; color: #0A0A0B; }
     .btn-secondary:hover:not(:disabled) { background: #E5E5EA; }
     .btn-ghost { background: transparent; color: #0A0A0B; }
     .btn-ghost:hover:not(:disabled) { background: #F2F2F7; }
     .btn-danger { background: rgba(255,59,48,0.10); color: #FF3B30; }
     .btn-danger:hover:not(:disabled) { background: rgba(255,59,48,0.16); }
-    .btn-success { background: #30D158; color: #fff; }
-    .btn-success:hover:not(:disabled) { background: #2BB94D; }
+    .btn-success { background: #2E7D5B; color: #fff; }
+    .btn-success:hover:not(:disabled) { background: #256B4D; }
     .btn-sm { height: 36px; padding: 0 14px; font-size: 14px; border-radius: 10px; }
 
     /* Inputs */
     input, textarea, select { font-family: inherit; }
-    .input { width: 100%; height: 44px; padding: 0 14px; background: #F2F2F7; border: 1px solid transparent; border-radius: 12px; font-size: 16px; color: #0A0A0B; transition: all 150ms; -webkit-appearance: none; }
-    .input:focus { outline: none; background: #fff; border-color: #0A84FF; box-shadow: 0 0 0 3px rgba(10,132,255,0.15); }
+    .input { width: 100%; height: 44px; padding: 0 14px; background: #fff; border: 1px solid #E5E5EA; border-radius: 12px; font-size: 16px; color: #0A0A0B; transition: all 150ms; -webkit-appearance: none; }
+    .input:focus { outline: none; background: #fff; border-color: #1F3A3D; box-shadow: 0 0 0 3px rgba(31,58,61,0.15); }
     textarea.input { height: auto; padding: 12px 14px; resize: vertical; min-height: 80px; }
 
     /* Tags soins — chips de sélection des clés (liens patient v2.6) */
@@ -124,22 +124,22 @@
     .soinkey input { position: absolute; opacity: 0; width: 0; height: 0; }
     .soinkey span { display: inline-block; padding: 5px 11px; border-radius: 9999px; border: 1px solid #E5E5EA; background: #fff; font-size: 13px; color: #3C3C43; cursor: pointer; user-select: none; transition: all 120ms; }
     .soinkey span:hover { border-color: #C7C7CC; }
-    .soinkey input:checked + span { background: rgba(10,132,255,0.10); border-color: #0A84FF; color: #0060CC; font-weight: 500; }
-    .soinkey input:focus-visible + span { box-shadow: 0 0 0 3px rgba(10,132,255,0.15); }
+    .soinkey input:checked + span { background: rgba(31,58,61,0.10); border-color: #1F3A3D; color: #1F3A3D; font-weight: 500; }
+    .soinkey input:focus-visible + span { box-shadow: 0 0 0 3px rgba(31,58,61,0.15); }
 
     /* Top nav */
     .nav-link { padding: 8px 14px; border-radius: 10px; font-weight: 500; font-size: 15px; color: #3C3C43; display: inline-flex; align-items: center; gap: 7px; transition: all 150ms; cursor: pointer; user-select: none; }
     .nav-link:hover { background: #F2F2F7; color: #0A0A0B; }
-    .nav-link.active { background: #0A0A0B; color: #fff; }
-    .nav-link.active:hover { background: #0A0A0B; color: #fff; }
+    .nav-link.active { background: rgba(31,58,61,0.10); color: #1F3A3D; }
+    .nav-link.active:hover { background: rgba(31,58,61,0.10); color: #1F3A3D; }
 
     /* Bottom tab bar (mobile) */
     .tab-link { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; color: #8E8E93; font-size: 11px; font-weight: 500; transition: color 150ms; }
-    .tab-link.active { color: #0A84FF; }
+    .tab-link.active { color: #1F3A3D; }
     .tab-link svg { width: 24px; height: 24px; }
 
     /* FAB */
-    .fab { position: fixed; right: 20px; bottom: calc(80px + env(safe-area-inset-bottom)); width: 56px; height: 56px; border-radius: 50%; background: #0A84FF; color: #fff; display: flex; align-items: center; justify-content: center; box-shadow: 0 8px 24px rgba(10,132,255,0.45), 0 2px 6px rgba(10,132,255,0.25); transition: all 200ms cubic-bezier(0.32, 0.72, 0, 1); z-index: 30; }
+    .fab { position: fixed; right: 20px; bottom: calc(80px + env(safe-area-inset-bottom)); width: 56px; height: 56px; border-radius: 50%; background: #1F3A3D; color: #fff; display: flex; align-items: center; justify-content: center; box-shadow: 0 8px 24px rgba(31,58,61,0.45), 0 2px 6px rgba(31,58,61,0.25); transition: all 200ms cubic-bezier(0.32, 0.72, 0, 1); z-index: 30; }
     .fab:active { transform: scale(0.92); }
 
     /* Modal / Sheet */
@@ -156,21 +156,21 @@
     }
 
     /* Capture zone */
-    .capture-zone { border: 1.5px dashed #C7C7CC; border-radius: 12px; background: #FAFAFA; padding: 14px; display: flex; align-items: center; gap: 12px; transition: all 200ms cubic-bezier(0.32, 0.72, 0, 1); cursor: pointer; }
-    .capture-zone:hover, .capture-zone.drag-over { border-color: #0A84FF; background: rgba(10,132,255,0.04); }
+    .capture-zone { border: 1.5px dashed #C7C7CC; border-radius: 12px; background: #FBFAF7; padding: 14px; display: flex; align-items: center; gap: 12px; transition: all 200ms cubic-bezier(0.32, 0.72, 0, 1); cursor: pointer; }
+    .capture-zone:hover, .capture-zone.drag-over { border-color: #1F3A3D; background: rgba(31,58,61,0.04); }
     .capture-zone.has-image { border-style: solid; border-color: #E5E5EA; background: #fff; cursor: default; }
 
     /* Stat card */
     .stat-card { background: #fff; border: 1px solid #E5E5EA; border-radius: 16px; padding: 18px 20px; opacity: 0; animation: fadeUp 400ms cubic-bezier(0.32, 0.72, 0, 1) forwards; position: relative; overflow: hidden; }
     .stat-card-pending::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: #FF9F0A; }
-    .stat-card-accepted::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: #30D158; }
-    .stat-card-rate::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: #0A84FF; }
+    .stat-card-accepted::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: #2E7D5B; }
+    .stat-card-rate::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: #1F3A3D; }
 
     /* List rows */
     .list-row { padding: 14px 16px; transition: background 100ms; cursor: pointer; -webkit-tap-highlight-color: transparent; }
     .list-row:active { background: #F2F2F7; }
     @media (min-width: 768px) {
-      .list-row:hover { background: #FAFAFA; }
+      .list-row:hover { background: #FBFAF7; }
     }
 
     /* Segmented control */
@@ -188,7 +188,7 @@
     .switch input { opacity: 0; width: 0; height: 0; }
     .switch-slider { position: absolute; cursor: pointer; inset: 0; background: #E5E5EA; border-radius: 9999px; transition: background 200ms; }
     .switch-slider::before { position: absolute; content: ''; height: 27px; width: 27px; left: 2px; top: 2px; background: #fff; border-radius: 50%; transition: transform 200ms cubic-bezier(0.32, 0.72, 0, 1); box-shadow: 0 2px 4px rgba(0,0,0,0.15); }
-    .switch input:checked + .switch-slider { background: #30D158; }
+    .switch input:checked + .switch-slider { background: #2E7D5B; }
     .switch input:checked + .switch-slider::before { transform: translateX(20px); }
 
     kbd { font-family: ui-monospace, "SF Mono", Consolas, monospace; padding: 1px 6px; background: #F2F2F7; border: 1px solid #E5E5EA; border-radius: 5px; font-size: 12px; color: #3C3C43; }
@@ -196,8 +196,8 @@
     /* Electron mode indicator */
     body.is-electron .electron-only { display: inline-flex; }
     body:not(.is-electron) .electron-only { display: none !important; }
-    .electron-badge { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 6px; background: rgba(48,209,88,0.12); color: #137A33; font-size: 11px; font-weight: 600; }
-    .electron-badge::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: #30D158; }
+    .electron-badge { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 6px; background: rgba(46,125,91,0.12); color: #137A33; font-size: 11px; font-weight: 600; }
+    .electron-badge::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: #2E7D5B; }
   </style>
 </head>
 <body class="bg-ink-50 min-h-screen text-ink-900">
@@ -270,7 +270,7 @@
           <div class="px-5 py-3.5 flex items-center justify-between border-b border-ink-100">
             <div class="flex items-center gap-2.5">
               <div class="w-9 h-9 rounded-xl bg-accent/12 flex items-center justify-center">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#0A84FF" stroke-width="2.5"><path d="M12 2v6m0 8v6M5.6 5.6l4.2 4.2m4.4 4.4l4.2 4.2M2 12h6m8 0h6M5.6 18.4l4.2-4.2m4.4-4.4l4.2-4.2"/></svg>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#1F3A3D" stroke-width="2.5"><path d="M12 2v6m0 8v6M5.6 5.6l4.2 4.2m4.4 4.4l4.2 4.2M2 12h6m8 0h6M5.6 18.4l4.2-4.2m4.4-4.4l4.2-4.2"/></svg>
               </div>
               <div>
                 <div class="text-[16px] font-semibold leading-tight">Rappels maintenance</div>
@@ -479,7 +479,7 @@
       </div>
 
       <!-- Stat principale : CA accepté (hero card) -->
-      <div class="rounded-2xl p-6 md:p-8 mb-3" style="background: linear-gradient(135deg, rgba(48,209,88,0.10) 0%, rgba(48,209,88,0.04) 100%); border: 1px solid rgba(48,209,88,0.25)">
+      <div class="rounded-2xl p-6 md:p-8 mb-3" style="background: linear-gradient(135deg, rgba(46,125,91,0.10) 0%, rgba(46,125,91,0.04) 100%); border: 1px solid rgba(46,125,91,0.25)">
         <div class="text-[11px] uppercase tracking-wider text-success font-semibold flex items-center gap-1.5 mb-2">
           <span class="w-1.5 h-1.5 rounded-full bg-success"></span>
           CA accepté ce mois
@@ -503,7 +503,7 @@
           <div id="stat-devis-count" class="text-[11px] text-ink-500 mt-0.5 truncate">— devis</div>
         </div>
 
-        <div class="bg-white border border-ink-200 rounded-2xl p-3 md:p-4" style="border-left: 3px solid #0A84FF">
+        <div class="bg-white border border-ink-200 rounded-2xl p-3 md:p-4" style="border-left: 3px solid #1F3A3D">
           <div class="text-[10px] md:text-[11px] uppercase tracking-wider text-accent font-semibold flex items-center gap-1.5">
             <span class="w-1.5 h-1.5 rounded-full bg-accent"></span>
             <span class="hidden sm:inline">Soins terminés ce mois</span><span class="sm:hidden">Soins</span>
@@ -840,7 +840,7 @@
         <div class="grouped-row cursor-pointer" id="drive-restore-btn">
           <div class="flex items-center gap-3">
             <div class="w-8 h-8 rounded-lg bg-accent/10 flex items-center justify-center">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#0A84FF" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#1F3A3D" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
             </div>
             <div>
               <div class="text-[15px] font-medium text-accent">Restaurer depuis Google Drive</div>
@@ -3416,7 +3416,7 @@ Règles :
     const dotsAccepte = months.map((m, i) => {
       if (m.accepte === 0) return '';
       const p = xy(i, m.accepte);
-      return `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="4" fill="#30D158" stroke="#fff" stroke-width="1.5"/>`;
+      return `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="4" fill="#2E7D5B" stroke="#fff" stroke-width="1.5"/>`;
     }).join('');
     const dotsEnvoye = months.map((m, i) => {
       if (m.envoye === 0) return '';
@@ -3434,13 +3434,13 @@ Règles :
     // Ligne verticale + cercles surlignés (cachés par défaut)
     const guideLine = `<line id="stat-chart-guide" x1="0" y1="${padT}" x2="0" y2="${H - padB}" stroke="#1c1c1e" stroke-width="1" stroke-dasharray="3,3" opacity="0"/>`;
     const guideDotEnv = `<circle id="stat-chart-guide-env" cx="0" cy="0" r="5" fill="#94999a" stroke="#fff" stroke-width="2" opacity="0"/>`;
-    const guideDotAcc = `<circle id="stat-chart-guide-acc" cx="0" cy="0" r="5.5" fill="#30D158" stroke="#fff" stroke-width="2" opacity="0"/>`;
+    const guideDotAcc = `<circle id="stat-chart-guide-acc" cx="0" cy="0" r="5.5" fill="#2E7D5B" stroke="#fff" stroke-width="2" opacity="0"/>`;
 
     const svg = `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" style="display:block;max-width:100%">
       ${yLabels}
       <line x1="${padL}" y1="${padT}" x2="${padL}" y2="${H - padB}" stroke="#E5E5EA" stroke-width="1"/>
       <polyline points="${polyline('envoye')}" fill="none" stroke="#94999a" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
-      <polyline points="${polyline('accepte')}" fill="none" stroke="#30D158" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>
+      <polyline points="${polyline('accepte')}" fill="none" stroke="#2E7D5B" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>
       ${dotsEnvoye}
       ${dotsAccepte}
       ${labels}
@@ -3480,8 +3480,8 @@ Règles :
       tip.innerHTML = `
         <div style="font-weight:600;margin-bottom:4px;">${monthCap}</div>
         <div style="display:flex;align-items:center;gap:6px;"><span style="width:8px;height:2px;background:#94999a;display:inline-block;border-radius:1px"></span><span style="color:#9e9ea3">Envoyé</span> <span style="margin-left:auto;font-variant-numeric:tabular-nums">${fmtMoney(m.envoye)} <span style="color:#6e6e72">· ${m.envoyeCount}</span></span></div>
-        <div style="display:flex;align-items:center;gap:6px;margin-top:2px;"><span style="width:8px;height:2px;background:#30D158;display:inline-block;border-radius:1px"></span><span style="color:#9e9ea3">Accepté</span> <span style="margin-left:auto;font-variant-numeric:tabular-nums">${fmtMoney(m.accepte)} <span style="color:#6e6e72">· ${m.accepteCount}</span></span></div>
-        ${m.soinsTerminesCount > 0 ? `<div style="display:flex;align-items:center;gap:6px;margin-top:2px;"><span style="color:#30D158;font-weight:700;width:8px;display:inline-block;text-align:center;line-height:1">✓</span><span style="color:#9e9ea3">Soins faits</span> <span style="margin-left:auto;font-variant-numeric:tabular-nums">${fmtMoney(m.caRealise)} <span style="color:#6e6e72">· ${m.soinsTerminesCount}</span></span></div>` : ''}
+        <div style="display:flex;align-items:center;gap:6px;margin-top:2px;"><span style="width:8px;height:2px;background:#2E7D5B;display:inline-block;border-radius:1px"></span><span style="color:#9e9ea3">Accepté</span> <span style="margin-left:auto;font-variant-numeric:tabular-nums">${fmtMoney(m.accepte)} <span style="color:#6e6e72">· ${m.accepteCount}</span></span></div>
+        ${m.soinsTerminesCount > 0 ? `<div style="display:flex;align-items:center;gap:6px;margin-top:2px;"><span style="color:#2E7D5B;font-weight:700;width:8px;display:inline-block;text-align:center;line-height:1">✓</span><span style="color:#9e9ea3">Soins faits</span> <span style="margin-left:auto;font-variant-numeric:tabular-nums">${fmtMoney(m.caRealise)} <span style="color:#6e6e72">· ${m.soinsTerminesCount}</span></span></div>` : ''}
       `;
       // Position tooltip (clamp horizontal pour rester dans le container)
       const tipRect = tip.getBoundingClientRect();
@@ -3956,7 +3956,7 @@ Règles :
           ${reviewSent ? `
             <div class="grouped-row block">
               <div class="flex items-center gap-2">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#30D158" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#2E7D5B" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
                 <div class="text-[14px] text-ink-700"><span class="font-medium">Mail d'avis envoyé</span> le ${formatDate(reviewSent.at)} <span class="text-ink-400">(${reviewSent.source})</span></div>
               </div>
             </div>
