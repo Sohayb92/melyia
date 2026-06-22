@@ -210,20 +210,28 @@
     <div class="max-w-4xl mx-auto px-6 h-12 flex items-center justify-between">
       <div class="text-[15px] font-semibold tracking-tight text-ink-900">Melyia</div>
       <nav class="flex items-center gap-0.5">
-        <a class="nav-link active" data-view="dashboard">Devis</a>
+        <a class="nav-link active" data-view="dashboard">Cabinet</a>
         <a class="nav-link" data-view="patients">Patients</a>
-        <a class="nav-link" data-view="stats">Stats</a>
-        <a class="nav-link" data-view="reminders">Rappels</a>
+        <a class="nav-link" data-view="stats">Activité</a>
         <a class="nav-link" data-view="settings">Réglages</a>
-        <button id="open-new-btn-desktop" class="btn btn-primary btn-sm ml-2">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-          Nouveau
-        </button>
-        <button id="import-devis-btn" class="btn btn-secondary btn-sm ml-1" title="Importer un devis PDF exporté de Logos">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-          Importer
-        </button>
-        <input type="file" id="import-devis-input" accept="application/pdf" multiple style="display:none"/>
+        <div class="relative ml-2">
+          <button id="add-devis-btn" class="btn btn-primary btn-sm" aria-haspopup="true">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            Devis
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" class="ml-0.5"><polyline points="6 9 12 15 18 9"/></svg>
+          </button>
+          <div id="add-devis-menu" class="hidden absolute right-0 mt-1 w-56 bg-white rounded-xl shadow-lg border border-ink-200 py-1 z-50">
+            <button id="add-devis-saisir" class="w-full text-left px-4 py-2.5 text-[14px] text-ink-900 hover:bg-ink-50 flex items-center gap-2.5">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+              Saisir un devis
+            </button>
+            <button id="add-devis-importer" class="w-full text-left px-4 py-2.5 text-[14px] text-ink-900 hover:bg-ink-50 flex items-center gap-2.5">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+              Importer un PDF (Logos)
+            </button>
+          </div>
+          <input type="file" id="import-devis-input" accept="application/pdf" multiple style="display:none"/>
+        </div>
       </nav>
     </div>
   </header>
@@ -872,10 +880,10 @@
   </button>
 
   <!-- Bottom tab bar (mobile) -->
-  <nav class="md:hidden fixed bottom-0 inset-x-0 z-30 bg-white/90 backdrop-blur-xl border-t border-ink-200 grid grid-cols-5 h-[68px] pb-safe">
+  <nav class="md:hidden fixed bottom-0 inset-x-0 z-30 bg-white/90 backdrop-blur-xl border-t border-ink-200 grid grid-cols-4 h-[68px] pb-safe">
     <button class="tab-link active" data-view="dashboard">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-      <span>Devis</span>
+      <span>Cabinet</span>
     </button>
     <button class="tab-link" data-view="patients">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
@@ -883,11 +891,7 @@
     </button>
     <button class="tab-link" data-view="stats">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
-      <span>Stats</span>
-    </button>
-    <button class="tab-link" data-view="reminders">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
-      <span>Rappels</span>
+      <span>Activité</span>
     </button>
     <button class="tab-link" data-view="settings">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
@@ -2229,7 +2233,7 @@ Règles :
     window.scrollTo(0, 0);
     if (view === 'dashboard') { setGreeting(); renderDashboard(); document.getElementById('mobile-header-title').textContent = 'Melyia'; }
     if (view === 'patients') { renderPatients(); document.getElementById('mobile-header-title').textContent = 'Patients'; }
-    if (view === 'stats') { currentStatsMonthOffset = 0; renderStats(); document.getElementById('mobile-header-title').textContent = 'Stats'; }
+    if (view === 'stats') { currentStatsMonthOffset = 0; renderStats(); document.getElementById('mobile-header-title').textContent = 'Activité'; }
     if (view === 'reminders') { renderReminders(); document.getElementById('mobile-header-title').textContent = 'Rappels'; }
     if (view === 'settings') { renderSettings(); document.getElementById('mobile-header-title').textContent = 'Réglages'; }
   }
@@ -2391,14 +2395,21 @@ Règles :
     selectedPatientForDevis = null;
   }
 
-  document.getElementById('open-new-btn-desktop').addEventListener('click', () => openModal());
+  // C1 — menu "+ Devis ▾" du header desktop (fusion Nouveau + Importer)
   (function () {
-    const ib = document.getElementById('import-devis-btn');
+    const btn = document.getElementById('add-devis-btn');
+    const menu = document.getElementById('add-devis-menu');
+    const saisir = document.getElementById('add-devis-saisir');
+    const importer = document.getElementById('add-devis-importer');
     const ii = document.getElementById('import-devis-input');
-    if (ib && ii) {
-      ib.addEventListener('click', () => ii.click());
-      ii.addEventListener('change', (e) => { const files = Array.from(e.target.files || []); e.target.value = ''; if (files.length) { _importQueue = files; _importBatchPatient = null; processNextImport(); } });
+    const closeMenu = () => { if (menu) menu.classList.add('hidden'); };
+    if (btn && menu) {
+      btn.addEventListener('click', (e) => { e.stopPropagation(); menu.classList.toggle('hidden'); });
+      document.addEventListener('click', (e) => { if (!menu.classList.contains('hidden') && !menu.contains(e.target) && !btn.contains(e.target)) closeMenu(); });
     }
+    if (saisir) saisir.addEventListener('click', () => { closeMenu(); openModal(); });
+    if (importer && ii) importer.addEventListener('click', () => { closeMenu(); ii.click(); });
+    if (ii) ii.addEventListener('change', (e) => { const files = Array.from(e.target.files || []); e.target.value = ''; if (files.length) { _importQueue = files; _importBatchPatient = null; processNextImport(); } });
   })();
   document.getElementById('open-new-btn-mobile').addEventListener('click', () => openModal());
   document.getElementById('cancel-modal').addEventListener('click', closeModal);
