@@ -164,9 +164,6 @@
 
     /* Stat card */
     .stat-card { background: #fff; border: 1px solid #E5E5EA; border-radius: 16px; padding: 18px 20px; opacity: 0; animation: fadeUp 400ms cubic-bezier(0.32, 0.72, 0, 1) forwards; position: relative; overflow: hidden; }
-    .stat-card-pending::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: #FF9F0A; }
-    .stat-card-accepted::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: #2E7D5B; }
-    .stat-card-rate::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: #1F3A3D; }
 
     /* List rows */
     .list-row { padding: 14px 16px; transition: background 100ms; cursor: pointer; -webkit-tap-highlight-color: transparent; }
@@ -304,8 +301,7 @@
       </div>
 
       <!-- Stats grid : 3 cards (Total retiré, redondant) -->
-      <div class="grid grid-cols-3 gap-3 mb-6 mt-5">
-        <span id="stat-total" class="hidden">0</span><span id="stat-total-amount" class="hidden">0 €</span>
+      <div class="grid grid-cols-2 gap-3 mb-6 mt-5">
         <div class="stat-card stat-card-pending" style="animation-delay: 50ms">
           <div class="text-[12px] text-warning font-medium">En attente</div>
           <div class="text-[22px] font-semibold tabular-nums leading-none mt-2.5 text-ink-900" id="stat-pending">0</div>
@@ -315,30 +311,6 @@
           <div class="text-[12px] text-success font-medium">Acceptés</div>
           <div class="text-[22px] font-semibold tabular-nums leading-none mt-2.5 text-ink-900" id="stat-accepted">0</div>
           <div class="text-[12px] text-ink-500 mt-2 tabular-nums" id="stat-accepted-amount">0 €</div>
-        </div>
-        <div class="stat-card stat-card-rate" style="animation-delay: 150ms">
-          <div class="text-[12px] text-accent font-medium">Conversion globale</div>
-          <div class="text-[22px] font-semibold tabular-nums leading-none mt-2.5 text-ink-900" id="stat-rate">—</div>
-          <div class="text-[12px] text-ink-500 mt-2" id="stat-rate-detail">—</div>
-        </div>
-      </div>
-
-      <!-- Vue "Aujourd'hui" : snapshot secondaire (sous les KPIs pipeline) -->
-      <div class="mb-6">
-        <div class="text-[11px] uppercase tracking-wider text-ink-500 font-semibold mb-2 ml-1" id="today-label">Aujourd'hui</div>
-        <div class="grid grid-cols-3 gap-3">
-          <div class="bg-white border border-ink-200 rounded-xl p-4">
-            <div class="text-[20px] font-semibold tabular-nums leading-none text-ink-900" id="today-patients">0</div>
-            <div class="text-[12px] text-ink-500 mt-1.5">patient<span id="today-patients-s"></span></div>
-          </div>
-          <div class="bg-white border border-ink-200 rounded-xl p-4">
-            <div class="text-[20px] font-semibold tabular-nums leading-none text-ink-900" id="today-devis">0</div>
-            <div class="text-[12px] text-ink-500 mt-1.5">devis envoyé<span id="today-devis-s"></span></div>
-          </div>
-          <div class="bg-white border border-ink-200 rounded-xl p-4">
-            <div class="text-[16px] font-semibold tabular-nums leading-none text-ink-900" id="today-amount">0 €</div>
-            <div class="text-[12px] text-ink-500 mt-1.5">CA envoyé</div>
-          </div>
         </div>
       </div>
 
@@ -2688,19 +2660,10 @@ Règles :
     const pendingAmount = pending.reduce((s, d) => s + (d.montant || 0), 0);
     const acceptedAmount = accepted.reduce((s, d) => s + (d.montant || 0), 0);
 
-    document.getElementById('stat-total').textContent = total;
-    document.getElementById('stat-total-amount').textContent = fmtMoney(totalAmount);
     document.getElementById('stat-pending').textContent = pending.length;
     document.getElementById('stat-pending-amount').textContent = fmtMoney(pendingAmount);
     document.getElementById('stat-accepted').textContent = accepted.length;
     document.getElementById('stat-accepted-amount').textContent = fmtMoney(acceptedAmount);
-    document.getElementById('stat-rate').textContent = rate;
-    // Sous-label : ratio explicite (en attente déjà visible dans sa card, pas de doublon)
-    if (total > 0) {
-      document.getElementById('stat-rate-detail').textContent = `${accepted.length} / ${total} accepté${accepted.length > 1 ? 's' : ''}`;
-    } else {
-      document.getElementById('stat-rate-detail').textContent = 'Aucun encore';
-    }
 
     // v2.5.8 — Badge "Soins à vérifier"
     try {
@@ -2717,18 +2680,6 @@ Règles :
       console.error('[Melyia] getSoinsToCheck failed:', e);
     }
 
-    // Vue "Aujourd'hui" : compter les devis créés aujourd'hui + leur CA + patients créés aujourd'hui
-    const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
-    const todayDevis = all.filter(d => d.created_at && new Date(d.created_at).getTime() >= todayStart.getTime());
-    const todayDevisAmount = todayDevis.reduce((s, d) => s + (d.montant || 0), 0);
-    const allPatientsToday = (await db.patients.toArray()).filter(p => p.created_at && new Date(p.created_at).getTime() >= todayStart.getTime());
-    document.getElementById('today-patients').textContent = allPatientsToday.length;
-    document.getElementById('today-patients-s').textContent = allPatientsToday.length > 1 ? 's créés' : ' créé';
-    document.getElementById('today-devis').textContent = todayDevis.length;
-    document.getElementById('today-devis-s').textContent = todayDevis.length > 1 ? 's' : '';
-    document.getElementById('today-amount').textContent = fmtMoney(todayDevisAmount);
-    const todayLabel = new Date().toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' });
-    document.getElementById('today-label').textContent = todayLabel.charAt(0).toUpperCase() + todayLabel.slice(1);
 
     // Relances dues — triées par date_relance_prevue ASC (les plus en retard en premier)
     // Exclut les patients ayant demandé STOP (compliance LCEN)
