@@ -2083,6 +2083,69 @@ Règles :
     setTimeout(() => { if (!handled) { cleanup(); if (onCancel) onCancel('timeout'); } }, durationMs);
   }
 
+  // P1-B — toast avec un bouton "Annuler" (auto-validé après durationMs). Support de l'optimistic UI.
+  function toastUndo(message, onUndo, { durationMs = 6000 } = {}) {
+    const el = document.createElement('div');
+    el.className = 'toast toast-success';
+    el.style.cssText = 'display:flex;align-items:center;gap:10px;padding:12px 14px;max-width:min(540px,92vw)';
+    const msgSpan = document.createElement('span');
+    msgSpan.style.cssText = 'flex:1;font-size:14px';
+    msgSpan.textContent = message;
+    const undoBtn = document.createElement('button');
+    undoBtn.textContent = 'Annuler';
+    undoBtn.style.cssText = 'background:#fff;color:#0A0A0B;border:none;padding:6px 14px;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer';
+    el.appendChild(msgSpan);
+    el.appendChild(undoBtn);
+    document.getElementById('toast-container').appendChild(el);
+    let handled = false;
+    const cleanup = () => {
+      if (handled) return;
+      handled = true;
+      el.style.opacity = '0';
+      el.style.transform = 'translate(-50%, -16px)';
+      el.style.transition = 'all 0.25s';
+      setTimeout(() => el.remove(), 250);
+    };
+    undoBtn.onclick = () => { cleanup(); if (onUndo) onUndo(); };
+    setTimeout(cleanup, durationMs);
+  }
+
+  function isStatsViewActive() {
+    const v = document.getElementById('view-stats');
+    return !!(v && v.classList.contains('active'));
+  }
+
+  // P1-B — applique un changement de statut devis en arrière-plan (optimistic UI).
+  // L'appelant a DÉJÀ fait la maj visuelle immédiate (retrait de ligne / fermeture de fiche).
+  // undoPatch fourni => toast "Annuler" qui restaure l'état précédent. preOp = écriture annexe optionnelle.
+  async function applyDevisUpdate(id, patch, opts = {}) {
+    const { toastMsg = 'Enregistré', undoPatch = null, undoMsg = 'Annulé', preOp = null } = opts;
+    try {
+      if (preOp) await preOp();
+      await db.devis.update(id, patch);
+    } catch (e) {
+      toast('Erreur — non enregistré : ' + (e && e.message ? e.message : e), 'error');
+      renderDashboard();
+      if (isStatsViewActive()) renderStats();
+      return;
+    }
+    // réconciliation (KPIs / listes) — hors du chemin critique, le visuel a déjà bougé
+    renderDashboard();
+    if (isStatsViewActive()) renderStats();
+    scheduleAutoBackup();
+    if (undoPatch) {
+      toastUndo(toastMsg, async () => {
+        try { await db.devis.update(id, undoPatch); } catch (e) {}
+        renderDashboard();
+        if (isStatsViewActive()) renderStats();
+        scheduleAutoBackup();
+        toast(undoMsg, 'info');
+      });
+    } else {
+      toast(toastMsg, 'success');
+    }
+  }
+
   function formatDate(d) {
     if (!d) return '—';
     return new Date(d).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric' });
@@ -2585,28 +2648,41 @@ Règles :
           catch (e) { window.prompt('Lien page patient :', url); }
           return;
         }
+        // P1-B — actions de décision : optimistic UI + Annuler (Accepté / Refusé / Sans réponse / Soin terminé)
+        if (action === 'accepted' || action === 'refused' || action === 'noresponse' || action === 'soin-termine') {
+          let patch, undoPatch, msg;
+          if (action === 'accepted') {
+            patch = { status: 'Accepté', dateAcceptation: new Date().toISOString() };
+            undoPatch = { status: devis.status, dateAcceptation: devis.dateAcceptation || null };
+            msg = 'Devis accepté · RDV pris';
+          } else if (action === 'refused') {
+            patch = { status: 'Refusé', dateRefus: new Date().toISOString() };
+            undoPatch = { status: devis.status, dateRefus: devis.dateRefus || null };
+            msg = 'Devis refusé';
+          } else if (action === 'noresponse') {
+            patch = { status: 'Sans réponse', dateSansReponse: new Date().toISOString() };
+            undoPatch = { status: devis.status, dateSansReponse: devis.dateSansReponse || null };
+            msg = 'Marqué sans réponse';
+          } else { // soin-termine
+            patch = { soinTermine: true, dateSoinTermine: new Date().toISOString() };
+            undoPatch = { soinTermine: false, dateSoinTermine: null };
+            msg = 'Soin marqué terminé';
+          }
+          closeDetail(); // fermeture immédiate (optimistic)
+          applyDevisUpdate(id, patch, { toastMsg: msg, undoPatch });
+          return;
+        }
+        // Autres actions (relancer, reopen, undo-soin-termine) — INCHANGÉES
         if (action === 'relancer') {
           await db.relances.add({ devis_id: id, date: new Date().toISOString() });
           const abandonDays = parseInt(getSetting('abandonDays', '24'), 10) || 24;
           await db.devis.update(id, { status: 'Relancé', date_relance_prevue: addDays(new Date(), abandonDays) });
           toast('Relance enregistrée', 'success');
-        } else if (action === 'accepted') {
-          await db.devis.update(id, { status: 'Accepté', dateAcceptation: new Date().toISOString() });
-          toast('Devis accepté · RDV pris', 'success');
-        } else if (action === 'refused') {
-          await db.devis.update(id, { status: 'Refusé', dateRefus: new Date().toISOString() });
-          toast('Devis refusé', 'info');
-        } else if (action === 'noresponse') {
-          await db.devis.update(id, { status: 'Sans réponse', dateSansReponse: new Date().toISOString() });
-          toast('Marqué sans réponse', 'info');
         } else if (action === 'reopen') {
           const relanceDays = parseInt(getSetting('relanceDays', '21'), 10) || 21;
           // Reopen efface dateAcceptation/Refus/SansReponse pour ne pas polluer les stats events-based
           await db.devis.update(id, { status: 'En attente', date_relance_prevue: addDays(new Date(), relanceDays), dateAcceptation: null, dateRefus: null, dateSansReponse: null });
           toast('Remis en attente', 'success');
-        } else if (action === 'soin-termine') {
-          await db.devis.update(id, { soinTermine: true, dateSoinTermine: new Date().toISOString() });
-          toast('Soin marqué terminé', 'success');
         } else if (action === 'undo-soin-termine') {
           await db.devis.update(id, { soinTermine: false, dateSoinTermine: null });
           toast('Soin remis non terminé', 'info');
@@ -2614,7 +2690,7 @@ Règles :
         closeDetail();
         renderDashboard();
         // v2.5.11 — Re-render Stats si on est sur cette vue (le user ne voyait pas son acceptation de devis remonter)
-        if (document.getElementById('view-stats') && document.getElementById('view-stats').classList.contains('active')) renderStats();
+        if (isStatsViewActive()) renderStats();
         scheduleAutoBackup();
       });
     });
@@ -2730,7 +2806,7 @@ Règles :
               ? `<button class="quick-relance-btn btn btn-secondary btn-sm !px-3" data-id="${d.id}" data-first="true" title="Marquer comme relancé (sans envoyer de mail)">${mailIconSvg}</button>`
               : `<button class="quick-relance-btn btn btn-secondary btn-sm !px-3" data-id="${d.id}" data-first="false" title="Sans réponse">${dashIconSvg}</button>`);
         return `
-          <div class="px-4 py-3 flex items-center justify-between gap-3">
+          <div class="px-4 py-3 flex items-center justify-between gap-3" data-row-id="${d.id}">
             <div class="flex-1 min-w-0 cursor-pointer open-detail-btn" data-id="${d.id}">
               <div class="flex items-center gap-2">
                 <div class="text-[15px] font-semibold truncate">${esc(patientFullName(pInfo))}</div>
@@ -2911,23 +2987,29 @@ Règles :
       });
     });
     document.querySelectorAll('.quick-relance-btn').forEach(b => {
-      b.addEventListener('click', async (e) => {
+      b.addEventListener('click', (e) => {
         e.stopPropagation();
-        await withBusyGuard('quick-relance-' + b.dataset.id, async () => {
-          const id = parseInt(b.dataset.id, 10);
-          const isFirst = b.dataset.first === 'true';
-          if (isFirst) {
+        const id = parseInt(b.dataset.id, 10);
+        const isFirst = b.dataset.first === 'true';
+        if (isFirst) {
+          // "Marquer relancé" (log relance + reprogrammation) — INCHANGÉ : P1-B n'y touche pas
+          withBusyGuard('quick-relance-' + id, async () => {
             await db.relances.add({ devis_id: id, date: new Date().toISOString() });
             const abandonDays = parseInt(getSetting('abandonDays', '24'), 10) || 24;
             await db.devis.update(id, { status: 'Relancé', date_relance_prevue: addDays(new Date(), abandonDays) });
             toast('Relance enregistrée', 'success');
-          } else {
-            await db.devis.update(id, { status: 'Sans réponse', dateSansReponse: new Date().toISOString() });
-            toast('Marqué sans réponse', 'info');
-          }
-          renderDashboard();
-          if (typeof scheduleAutoBackup === 'function') scheduleAutoBackup();
-        });
+            renderDashboard();
+            if (typeof scheduleAutoBackup === 'function') scheduleAutoBackup();
+          });
+          return;
+        }
+        // "Sans réponse" — P1-B optimistic UI + Annuler
+        const d = all.find(x => x.id === id);
+        if (!d) return;
+        const undoPatch = { status: d.status, dateSansReponse: d.dateSansReponse || null };
+        const row = b.closest('[data-row-id]');
+        if (row) row.remove();
+        withBusyGuard('quick-relance-' + id, () => applyDevisUpdate(id, { status: 'Sans réponse', dateSansReponse: new Date().toISOString() }, { toastMsg: 'Marqué sans réponse', undoPatch }));
       });
     });
     // Bouton "Relancer par mail Mélyia" (Gmail) sur dashboard quick-actions
@@ -2947,23 +3029,23 @@ Règles :
       });
     });
     document.querySelectorAll('.quick-action-btn').forEach(b => {
-      b.addEventListener('click', async (e) => {
+      b.addEventListener('click', (e) => {
         e.stopPropagation();
-        await withBusyGuard('quick-action-' + b.dataset.id, async () => {
-          const id = parseInt(b.dataset.id, 10);
-          const action = b.dataset.action;
-          const statusMap = { accepted: 'Accepté', refused: 'Refusé', noresponse: 'Sans réponse' };
-          // QW-2 (audit) : poser la date d'événement comme le fait la modale détail,
-          // sinon stats mensuelles events-based et chaîne avis Google aveugles à ces devis
-          const update = { status: statusMap[action] };
-          if (action === 'accepted') update.dateAcceptation = new Date().toISOString();
-          else if (action === 'refused') update.dateRefus = new Date().toISOString();
-          else if (action === 'noresponse') update.dateSansReponse = new Date().toISOString();
-          await db.devis.update(id, update);
-          toast(statusMap[action], 'success');
-          renderDashboard();
-          if (typeof scheduleAutoBackup === 'function') scheduleAutoBackup();
-        });
+        const id = parseInt(b.dataset.id, 10);
+        const action = b.dataset.action;
+        const d = all.find(x => x.id === id);
+        if (!d) return;
+        const statusMap = { accepted: 'Accepté', refused: 'Refusé', noresponse: 'Sans réponse' };
+        // QW-2 (audit) : poser la date d'événement comme la modale détail (stats events-based + chaîne avis)
+        const update = { status: statusMap[action] };
+        const undoPatch = { status: d.status };
+        if (action === 'accepted') { update.dateAcceptation = new Date().toISOString(); undoPatch.dateAcceptation = d.dateAcceptation || null; }
+        else if (action === 'refused') { update.dateRefus = new Date().toISOString(); undoPatch.dateRefus = d.dateRefus || null; }
+        else if (action === 'noresponse') { update.dateSansReponse = new Date().toISOString(); undoPatch.dateSansReponse = d.dateSansReponse || null; }
+        // P1-B optimistic UI : retrait immédiat de la ligne + persistance en fond + Annuler
+        const row = b.closest('[data-row-id]');
+        if (row) row.remove();
+        withBusyGuard('quick-action-' + id, () => applyDevisUpdate(id, update, { toastMsg: statusMap[action], undoPatch }));
       });
     });
   }
