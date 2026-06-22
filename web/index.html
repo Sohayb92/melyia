@@ -437,7 +437,7 @@
     <section id="view-stats" class="view">
       <div class="mb-6">
         <h1 class="text-[28px] md:text-[32px] font-bold tracking-tight">Stats</h1>
-        <p class="text-[15px] text-ink-500 mt-0.5">Pilote ton activité mois après mois</p>
+        <p class="text-[15px] text-ink-500 mt-0.5">Suivi de ton activité, mois après mois</p>
       </div>
 
       <!-- Sélecteur de mois -->
@@ -2694,7 +2694,7 @@ Règles :
     const relancesSection = document.getElementById('relances-section');
     if (relancesDues.length > 0) {
       relancesSection.classList.remove('hidden');
-      document.getElementById('relances-count-text').textContent = `${relancesDues.length} patient${relancesDues.length > 1 ? 's' : ''} à vérifier sur Doctolib`;
+      document.getElementById('relances-count-text').textContent = `${relancesDues.length} patient${relancesDues.length > 1 ? 's' : ''} à relancer`;
       const googleReady = GoogleAuth.isConnected();
       document.getElementById('relances-list').innerHTML = relancesDues.map(d => {
         const isFirst = d.status === 'En attente';
@@ -4685,7 +4685,7 @@ Bien cordialement,`;
     if (!window.melyiaElectron && count > 0 && Notification.permission === 'granted') {
       try {
         new Notification('Melyia — Relances à faire', {
-          body: `${count} patient${count > 1 ? 's' : ''} à vérifier sur Doctolib aujourd'hui`,
+          body: `${count} patient${count > 1 ? 's' : ''} à relancer aujourd'hui`,
           icon: 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" rx="22" fill="%230A84FF"/><text x="50" y="70" font-size="62" text-anchor="middle" fill="white" font-family="-apple-system,sans-serif" font-weight="700">M</text></svg>')
         });
       } catch (e) {}
@@ -5597,7 +5597,6 @@ Bien cordialement,`;
           recit.nom = patientFullName(pInfo);
           recit.jeton = devis.jeton;
           const rac = fmtRac(devis.montant);
-          if (rac) recit.rac = rac;
           jsonEl.value = JSON.stringify(recit, null, 2);
           jsonEl.classList.remove('hidden');
           actionsEl.classList.remove('hidden');
@@ -5808,7 +5807,7 @@ Bien cordialement,`;
 
     if (relancesDues.length > 0) {
       subjectParts.push(`${relancesDues.length} relance${relancesDues.length > 1 ? 's' : ''}`);
-      body += `📋 ${relancesDues.length} devis à vérifier sur Doctolib :\n\n`;
+      body += `📋 ${relancesDues.length} devis à relancer :\n\n`;
       body += relancesDues.map(d => {
         const p = devisPatientDisplay(d);
         const moneyStr = d.montant ? ` (${fmtMoney(d.montant)})` : '';
