@@ -2265,10 +2265,12 @@ Règles :
     document.querySelectorAll('#form-soins-keys-wrap input[type=checkbox]').forEach(c => { c.checked = set.has(c.value); });
   }
 
-  function openModal(devis = null, prefilledPatient = null, prefill = null) {
+  function openModal(devis = null, prefilledPatient = null, prefill = null, opts = {}) {
     document.getElementById('modal-form-overlay').classList.remove('hidden');
     document.body.style.overflow = 'hidden';
     selectedPatientForDevis = null;
+    // Anti-fuite : hors import, on purge le contexte d'import laissé par un import précédent non envoyé (sinon le mauvais patient sans email colle au devis suivant).
+    if (!prefill && !opts.keepImport) { pendingDevisPdf = null; _importBatchPatient = null; }
     document.getElementById('selected-patient-display').classList.add('hidden');
     document.getElementById('patient-picker-wrap').classList.remove('hidden');
     document.getElementById('patient-picker-input').value = '';
@@ -3765,7 +3767,7 @@ Règles :
         const pending = pendingDevisDataAfterPatientCreate;
         pendingDevisDataAfterPatientCreate = null;
         const p = await db.patients.get(patientId);
-        openModal(null, p);
+        openModal(null, p, null, { keepImport: true });
         setTimeout(() => {
           if (pending.montant) document.getElementById('form-montant').value = pending.montant;
           if (pending.date) document.getElementById('form-date').value = pending.date;
