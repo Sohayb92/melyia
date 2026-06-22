@@ -7,6 +7,12 @@ App Electron + PWA pour suivi de devis dentaires du Dr Sohaïb Kebieche (Colombe
 
 Stack : monolithe `melyia.html` (~5000 lignes) + mirror PWA `web/index.html`. Releases via `gh` CLI vers `Sohayb92/melyia`. Auto-update Electron pour Windows.
 
+## ⚠️ Le user N'EST PAS technique — je fais TOUT pour lui (fixé 2026-06-22)
+- **Ne jamais lui demander de taper une commande** (npm, git, node, build, .bat…). Je les exécute moi-même via mes outils.
+- **Pour qu'il teste : JE lance l'app pour lui** (voir Commandes utiles). Ne pas dire « tape npm start » — le faire.
+- **Expliquer en français simple, zéro jargon.** Donner des gestes concrets (« clic droit sur l'icône M en bas à droite près de l'horloge → Quitter »), pas des instructions techniques.
+- Builds, releases, lancements, vérifs, screenshots : **tout passe par moi.** Le user clique au maximum, ne tape rien.
+
 ## 6 règles de travail PERMANENTES (le user les a fixées 2026-05-21)
 
 1. **Plan avant le code.** Annoncer en français ce que je vais coder, attendre "OK". Pas de bypass même pour petits fixes.
@@ -50,8 +56,11 @@ Stack : monolithe `melyia.html` (~5000 lignes) + mirror PWA `web/index.html`. Re
 - Mentir sur des faits (ex: APHP au présent alors que le user a arrêté en 2025)
 - Push géant en fin de release (commit par étape, règle 3)
 - Lien Doctolib pour des RDV de SOINS (Doctolib = maintenance only ; soins = secrétaire). Ni discours coût/prise en charge dans les mails patients.
+- Expliquer/afficher l'ALTERNATIVE thérapeutique (RAC0 / acte sans reste à charge) au patient. On ne montre QUE le traitement proposé (mails, page /mon-devis, capture devis).
 
-## Commandes utiles
+## Commandes utiles (JE les lance, jamais le user)
+- **Lancer l'app DEV** (vraies données + mon code source `melyia.html`) : `Lancer Melyia App.bat`. ⚠️ `ELECTRON_RUN_AS_NODE=1` est présent dans mon shell → toujours lancer via le .bat (ou PowerShell qui clear la var), sinon Electron démarre en mode Node et crashe. ⚠️ **L'app INSTALLÉE doit être quittée** (tray → Quitter) sinon le single-instance lock bloque la version dev (elle ne fait que refocus l'installée).
+- **Lancer l'app DEV en données ISOLÉES** : `Lancer Melyia TEST.bat` (dossier `Melyia-DevTest`, peut tourner À CÔTÉ de l'installée, mais réglages Gemini/Google à re-saisir 1×).
+- **Screenshot (existe)** : `node scripts/screenshot.js [dashboard|stats|patient-detail|settings] [--mobile]` (Puppeteer, charge melyia.html, relaye les erreurs JS navigateur → sert aussi de check JS).
 - Build installer : `npx electron-builder --win nsis` (output `dist-electron/Melyia-Setup-{version}.exe`)
 - Path gh CLI : `/c/Program Files/GitHub CLI/gh.exe`
-- Screenshot : `node scripts/screenshot.js <url-ou-fichier>` (à créer)
