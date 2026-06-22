@@ -1716,8 +1716,9 @@ Chirurgien-dentiste — Cabinet Dentaire La Cabane
     });
   }
 
-  async function getMaintenancesDues() {
-    const all = await db.maintenances.toArray();
+  async function getMaintenancesDues(maintSnapshot) {
+    // P1-A : si le snapshot mémoire est fourni (renderDashboard) → filtre pur, sinon lecture DB (appelants standalone)
+    const all = maintSnapshot || await db.maintenances.toArray();
     const now = Date.now();
     return all.filter(m => m.actif === 1 && new Date(m.prochain_rappel).getTime() <= now);
   }
@@ -2654,8 +2655,11 @@ Règles :
   let currentSearch = '';
 
   async function renderDashboard() {
+    // P1-A : un seul snapshot {patients, devis, maintenances} par render → filtres purs (7 lectures DB → 3)
     await refreshPatientsCache();
     const all = await db.devis.toArray();
+    const allMaintenances = await db.maintenances.toArray();
+    const allPatients = Array.from(patientsCache.values());
 
     // Stats
     const total = all.length;
@@ -2684,7 +2688,7 @@ Règles :
 
     // v2.5.8 — Badge "Soins à vérifier" (patients acceptés depuis 30j+ sans soin marqué terminé)
     try {
-      const soinsToCheck = await getSoinsToCheck();
+      const soinsToCheck = await getSoinsToCheck(all);
       const card = document.getElementById('soins-to-check-card');
       if (soinsToCheck.length === 0) {
         card.classList.add('hidden');
@@ -2746,7 +2750,7 @@ Règles :
     }
 
     // Maintenances dues
-    const maintenancesDues = await getMaintenancesDues();
+    const maintenancesDues = await getMaintenancesDues(allMaintenances);
     const maintSection = document.getElementById('maintenance-section');
     if (maintenancesDues.length > 0) {
       maintSection.classList.remove('hidden');
@@ -2799,7 +2803,7 @@ Règles :
     const avisSection = document.getElementById('avis-section');
     const _reviewReady = getSetting('googleReviewEnabled', '0') === '1' && !!getSetting('googleReviewUrl', '').trim() && GoogleAuth.isConnected();
     let _avisItems = [];
-    if (_reviewReady) { try { _avisItems = await getReviewQueueItems(); } catch (e) { _avisItems = []; } }
+    if (_reviewReady) { try { _avisItems = await getReviewQueueItems(all, allPatients); } catch (e) { _avisItems = []; } }
     if (_avisItems.length > 0) {
       avisSection.classList.remove('hidden');
       document.getElementById('avis-count-text').textContent = _avisItems.length + ' avis à envoyer';
@@ -5873,12 +5877,13 @@ Bien cordialement,`;
   // v2.5.8 — Liste des devis acceptés depuis 30j+ sans soin marqué terminé.
   // Permet au user de cocher rapidement "Soin fait" depuis le dashboard (déclenche mail avis).
   // "Pas encore" repousse la vérif de 15j (flag soinCheckIgnoreUntil) pour les cas étalés.
-  async function getSoinsToCheck() {
+  async function getSoinsToCheck(devisSnapshot) {
     const delay = Math.max(7, parseInt(getSetting('soinsCheckDelay', '30'), 10) || 30);
     const now = Date.now();
     const cutoff = now - delay * 24 * 60 * 60 * 1000;
-    await refreshPatientsCache();
-    const all = await db.devis.toArray();
+    // P1-A : snapshot fourni (renderDashboard) → filtre pur ; sinon lecture DB + cache (appelants standalone)
+    let all = devisSnapshot;
+    if (!all) { await refreshPatientsCache(); all = await db.devis.toArray(); }
     return all.filter(d => {
       if (d.status !== 'Accepté') return false;
       if (d.soinTermine) return false; // déjà coché
@@ -5893,10 +5898,10 @@ Bien cordialement,`;
   }
 
   // E : items de la file d'avis à valider (soin terminé J+N + patients programmés échus), dédupliqués par patient.
-  async function getReviewQueueItems() {
+  async function getReviewQueueItems(devisSnapshot, patientsSnapshot) {
     const items = [];
     const seen = new Set();
-    const devisCands = await getGoogleReviewCandidates();
+    const devisCands = await getGoogleReviewCandidates(devisSnapshot);
     for (const d of devisCands) {
       const p = getCachedPatient(d.patient_id);
       if (!p || seen.has(p.id)) continue;
@@ -5904,7 +5909,8 @@ Bien cordialement,`;
       items.push({ patient: p, devisId: d.id, label: (d.soins || 'soin terminé') });
     }
     const now = Date.now();
-    const pats = await db.patients.toArray();
+    // P1-A : snapshot patients fourni (renderDashboard) → pas de re-read
+    const pats = patientsSnapshot || await db.patients.toArray();
     for (const p of pats) {
       if (seen.has(p.id)) continue;
       if (!p.reviewScheduledAt || new Date(p.reviewScheduledAt).getTime() > now) continue;
@@ -5925,12 +5931,13 @@ Bien cordialement,`;
     if (p.reviewScheduledAt) { try { await db.patients.update(patientId, { reviewScheduledAt: null }); } catch (e) {} }
   }
 
-  async function getGoogleReviewCandidates() {
+  async function getGoogleReviewCandidates(devisSnapshot) {
     const delay = Math.max(1, parseInt(getSetting('googleReviewDelay', '14'), 10) || 14);
     const now = Date.now();
     const cutoff = now - delay * 24 * 60 * 60 * 1000;
-    await refreshPatientsCache();
-    const all = await db.devis.toArray();
+    // P1-A : snapshot fourni (renderDashboard) → filtre pur ; sinon lecture DB + cache (appelants standalone)
+    let all = devisSnapshot;
+    if (!all) { await refreshPatientsCache(); all = await db.devis.toArray(); }
     return all.filter(d => {
       if (!d.soinTermine || !d.dateSoinTermine) return false;
       if (d.googleReviewMailSent) return false;
