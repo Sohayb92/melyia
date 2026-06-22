@@ -299,7 +299,7 @@
       </div>
 
       <!-- Stats grid : 3 cards (Total retiré, redondant) -->
-      <div class="grid grid-cols-2 gap-3 mb-6 mt-5">
+      <div class="grid grid-cols-3 gap-3 mb-6 mt-5">
         <div class="stat-card stat-card-pending" style="animation-delay: 50ms">
           <div class="text-[12px] text-warning font-medium">En attente</div>
           <div class="text-[22px] font-semibold tabular-nums leading-none mt-2.5 text-ink-900" id="stat-pending">0</div>
@@ -309,6 +309,11 @@
           <div class="text-[12px] text-success font-medium">Acceptés</div>
           <div class="text-[22px] font-semibold tabular-nums leading-none mt-2.5 text-ink-900" id="stat-accepted">0</div>
           <div class="text-[12px] text-ink-500 mt-2 tabular-nums" id="stat-accepted-amount">0 €</div>
+        </div>
+        <div class="stat-card stat-card-rate" style="animation-delay: 150ms">
+          <div class="text-[12px] text-accent font-medium">Taux d'acceptation</div>
+          <div class="text-[22px] font-semibold tabular-nums leading-none mt-2.5 text-ink-900" id="stat-rate">—</div>
+          <div class="text-[12px] text-ink-500 mt-2" id="stat-rate-detail">—</div>
         </div>
       </div>
 
@@ -2670,6 +2675,12 @@ Règles :
     document.getElementById('stat-pending-amount').textContent = fmtMoney(pendingAmount);
     document.getElementById('stat-accepted').textContent = accepted.length;
     document.getElementById('stat-accepted-amount').textContent = fmtMoney(acceptedAmount);
+    document.getElementById('stat-rate').textContent = rate;
+    if (total > 0) {
+      document.getElementById('stat-rate-detail').textContent = `${accepted.length} / ${total} accepté${accepted.length > 1 ? 's' : ''}`;
+    } else {
+      document.getElementById('stat-rate-detail').textContent = 'Aucun encore';
+    }
 
     // v2.5.8 — Badge "Soins à vérifier" (patients acceptés depuis 30j+ sans soin marqué terminé)
     try {
