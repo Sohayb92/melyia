@@ -169,6 +169,14 @@
     @media (min-width: 768px) {
       .list-row:hover { background: #FBFAF7; }
     }
+    /* P2-B — actions au survol des lignes de devis (desktop uniquement) */
+    .row-actions { opacity: 0; transition: opacity 120ms; pointer-events: none; background: linear-gradient(to right, rgba(251,250,247,0), #FBFAF7 28px); padding-left: 28px; }
+    .row-montant { transition: opacity 120ms; }
+    @media (min-width: 768px) {
+      .list-row.has-actions:hover .row-actions { opacity: 1; pointer-events: auto; }
+      .list-row.has-actions:hover .row-montant { opacity: 0; }
+    }
+    @media (max-width: 767px) { .row-actions { display: none !important; } }
 
     /* Segmented control */
     .segmented { display: inline-flex; background: #F2F2F7; border-radius: 10px; padding: 3px; gap: 0; }
@@ -2941,8 +2949,8 @@ Règles :
     document.querySelectorAll('#cabinet-view-toggle .segmented-item').forEach(it => it.classList.toggle('active', it.dataset.cabview === currentCabinetView));
     if (_isPatientsView) {
       renderCabinetPatients(document.getElementById('devis-list'), all, allPatients);
-      return;
-    }
+    } else {
+    const _googleReady = GoogleAuth.isConnected();
 
     // Liste devis
     // Tri DESC par date_envoi avec tiebreaker created_at DESC (sinon ordre instable quand même jour)
@@ -2993,8 +3001,9 @@ Règles :
         const isRelanceDue = (d.status === 'En attente' || d.status === 'Relancé') && new Date(d.date_relance_prevue).getTime() <= now;
         const displayStatus = isRelanceDue ? 'Relance due' : d.status;
         const pInfo = devisPatientDisplay(d);
+        const _hov = rowHoverActions(d, pInfo, _googleReady);
         return `
-          <div class="list-row open-detail-btn" data-id="${d.id}">
+          <div class="list-row open-detail-btn relative${_hov ? ' has-actions' : ''}" data-id="${d.id}">
             <div class="flex items-center justify-between gap-3">
               <div class="flex-1 min-w-0">
                 <div class="flex items-center gap-2 flex-wrap">
@@ -3005,14 +3014,16 @@ Règles :
                   ${esc(d.soins)} ${d.montant ? '· ' + fmtMoney(d.montant) : ''} · ${timeAgo(d.date_envoi)}
                 </div>
               </div>
-              ${d.montant ? `<div class="text-[14px] font-medium tabular-nums text-ink-700 flex-shrink-0">${fmtMoney(d.montant)}</div>` : ''}
+              ${d.montant ? `<div class="row-montant text-[14px] font-medium tabular-nums text-ink-700 flex-shrink-0">${fmtMoney(d.montant)}</div>` : ''}
             </div>
+            ${_hov ? `<div class="row-actions absolute inset-y-0 right-0 flex items-center pr-4 gap-1.5">${_hov}</div>` : ''}
           </div>
         `;
       }).join('');
     }
+    } // P1-C : fin du mode "Liste" (le bloc Par patient est géré au-dessus)
 
-    // Bind events
+    // Bind events — carte "À relancer" + liste devis. TOUJOURS exécuté (corrige le bug v2.6.29 : boutons morts en mode Par patient).
     document.querySelectorAll('.open-detail-btn').forEach(b => {
       b.addEventListener('click', (e) => {
         e.stopPropagation();
@@ -3081,6 +3092,14 @@ Règles :
         withBusyGuard('quick-action-' + id, () => applyDevisUpdate(id, update, { toastMsg: statusMap[action], undoPatch }));
       });
     });
+    // P2-B — "Soin terminé" au survol d'une ligne acceptée (optimistic UI + Annuler)
+    document.querySelectorAll('.quick-soin-btn').forEach(b => {
+      b.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const id = parseInt(b.dataset.id, 10);
+        withBusyGuard('quick-soin-' + id, () => applyDevisUpdate(id, { soinTermine: true, dateSoinTermine: new Date().toISOString() }, { toastMsg: 'Soin marqué terminé', undoPatch: { soinTermine: false, dateSoinTermine: null } }));
+      });
+    });
   }
 
   // P1-C C2 — vue "Par patient" dans Cabinet : regroupe les devis par patient (depuis le snapshot, 0 lecture DB)
@@ -3127,6 +3146,22 @@ Règles :
         </div>`;
     }).join('');
     listEl.querySelectorAll('.open-patient-btn').forEach(b => b.addEventListener('click', () => openPatientDetail(parseInt(b.dataset.id))));
+  }
+
+  // P2-B — boutons d'action au survol d'une ligne de devis (selon le statut). Réutilise les classes/handlers existants (mail-relance-btn, quick-action-btn) + quick-soin-btn.
+  function rowHoverActions(d, pInfo, googleReady) {
+    const id = d.id;
+    const mailSvg = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>';
+    const checkSvg = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>';
+    if (d.status === 'En attente' || d.status === 'Relancé') {
+      const canMail = googleReady && !!(pInfo && pInfo.email);
+      const relance = canMail ? `<button class="mail-relance-btn btn btn-secondary btn-sm !px-2.5" data-id="${id}" title="Relancer par mail">${mailSvg}</button>` : '';
+      return `${relance}<button class="quick-action-btn btn btn-success btn-sm !px-2.5" data-id="${id}" data-action="accepted" title="Marquer accepté">${checkSvg}</button>`;
+    }
+    if (d.status === 'Accepté' && !d.soinTermine) {
+      return `<button class="quick-soin-btn btn btn-primary btn-sm" data-id="${id}" title="Marquer le soin terminé">${checkSvg}<span class="ml-1.5 text-[12px]">Soin fait</span></button>`;
+    }
+    return '';
   }
 
   // P1-C C2 — toggle Liste / Par patient (Cabinet) + bouton "+ Patient" (visible en mode patients)
