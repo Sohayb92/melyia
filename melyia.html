@@ -566,7 +566,7 @@
         <p class="text-[15px] text-ink-500 mt-0.5">Configure tes préférences</p>
       </div>
 
-      <div class="mb-2 px-1 text-[12px] uppercase tracking-wider text-ink-500 font-semibold">Relances</div>
+      <div class="mb-2 px-1 text-[12px] uppercase tracking-wider text-ink-500 font-semibold settings-toggle">Relances</div>
       <div class="grouped-list mb-6">
         <div class="grouped-row">
           <div class="flex-1">
@@ -590,7 +590,7 @@
         </div>
       </div>
 
-      <div class="mb-2 px-1 text-[12px] uppercase tracking-wider text-ink-500 font-semibold">Saisie auto par capture</div>
+      <div class="mb-2 px-1 text-[12px] uppercase tracking-wider text-ink-500 font-semibold settings-toggle">Saisie auto par capture</div>
       <div class="grouped-list mb-2">
         <div class="grouped-row block">
           <div class="text-[15px] font-medium mb-1">Clé API Gemini</div>
@@ -600,7 +600,7 @@
       </div>
       <p class="text-[12px] text-ink-500 mb-6 px-1">Sans clé : la capture reste invisible, tu remplis tout à la main. Avec clé : colle la fiche Logos dans la modal Nouveau devis, l'IA pré-remplit en 3 sec.</p>
 
-      <div class="mb-2 px-1 text-[12px] uppercase tracking-wider text-ink-500 font-semibold">Page patient premium</div>
+      <div class="mb-2 px-1 text-[12px] uppercase tracking-wider text-ink-500 font-semibold settings-toggle">Page patient premium</div>
       <div class="grouped-list mb-2">
         <div class="grouped-row block">
           <div class="text-[15px] font-medium mb-1">Clé de publication</div>
@@ -610,7 +610,7 @@
       </div>
       <p class="text-[12px] text-ink-500 mb-6 px-1">Sans cette clé (une fois la sécurité activée côté serveur), la publication de la page patient sera refusée.</p>
 
-      <div class="mb-2 px-1 text-[12px] uppercase tracking-wider text-ink-500 font-semibold">Compte Google</div>
+      <div class="mb-2 px-1 text-[12px] uppercase tracking-wider text-ink-500 font-semibold settings-toggle">Compte Google</div>
       <div class="grouped-list mb-2">
         <div id="google-not-connected" class="grouped-row block">
           <div class="text-[15px] font-medium mb-1">Connecter ton compte Google</div>
@@ -643,7 +643,7 @@
       </div>
       <p class="text-[12px] text-ink-500 mb-6 px-1">Tes données Google ne quittent jamais ta machine. Les mails partent depuis ton Gmail (et apparaissent dans tes envoyés). Le backup va dans ton Drive perso.</p>
 
-      <div class="mb-2 px-1 text-[12px] uppercase tracking-wider text-ink-500 font-semibold">Profil</div>
+      <div class="mb-2 px-1 text-[12px] uppercase tracking-wider text-ink-500 font-semibold settings-toggle">Profil</div>
       <div class="grouped-list mb-6">
         <div class="grouped-row">
           <div class="flex-1">
@@ -693,7 +693,7 @@
         </div>
       </div>
 
-      <div class="mb-2 px-1 text-[12px] uppercase tracking-wider text-ink-500 font-semibold">Automatisations &amp; alertes</div>
+      <div class="mb-2 px-1 text-[12px] uppercase tracking-wider text-ink-500 font-semibold settings-toggle">Automatisations &amp; alertes</div>
       <div class="grouped-list mb-6">
         <div class="grouped-row">
           <div class="flex-1">
@@ -766,7 +766,7 @@
         </div>
       </div>
 
-      <div class="mb-2 px-1 text-[12px] uppercase tracking-wider text-ink-500 font-semibold">Avis Google auto</div>
+      <div class="mb-2 px-1 text-[12px] uppercase tracking-wider text-ink-500 font-semibold settings-toggle">Avis Google auto</div>
       <div class="grouped-list mb-2">
         <div class="grouped-row">
           <div class="flex-1">
@@ -811,7 +811,7 @@
       </div>
       <p class="text-[12px] text-ink-500 mb-6 px-1">1 mail max par devis. Patients marqués STOP exclus. Les mails partent en silence à la 1ère ouverture du jour de Mélyia.</p>
 
-      <div class="mb-2 px-1 text-[12px] uppercase tracking-wider text-ink-500 font-semibold">Données</div>
+      <div class="mb-2 px-1 text-[12px] uppercase tracking-wider text-ink-500 font-semibold settings-toggle">Données</div>
       <div class="grouped-list mb-6">
         <div class="grouped-row cursor-pointer" id="export-json-btn">
           <div class="flex items-center gap-3">
@@ -855,7 +855,7 @@
         </div>
       </div>
 
-      <div class="mb-2 px-1 text-[12px] uppercase tracking-wider text-ink-500 font-semibold">À propos</div>
+      <div class="mb-2 px-1 text-[12px] uppercase tracking-wider text-ink-500 font-semibold settings-toggle">À propos</div>
       <div class="grouped-list mb-6">
         <div class="grouped-row">
           <div class="flex-1 min-w-0">
@@ -875,9 +875,9 @@
         </div>
       </div>
 
-      <button id="save-settings-btn" class="text-[13px] text-accent hover:underline block mx-auto mt-2 mb-6">Enregistrer les modifications</button>
+      <button id="save-settings-btn" class="settings-keep text-[13px] text-accent hover:underline block mx-auto mt-2 mb-6">Enregistrer les modifications</button>
 
-      <div class="mb-2 px-1 text-[12px] uppercase tracking-wider text-danger/70 font-semibold">Zone sensible</div>
+      <div class="mb-2 px-1 text-[12px] uppercase tracking-wider text-danger/70 font-semibold settings-toggle">Zone sensible</div>
       <div class="grouped-list mb-6">
         <div class="grouped-row cursor-pointer" id="reset-btn">
           <div class="flex items-center gap-3">
@@ -2250,7 +2250,7 @@ Règles :
     if (view === 'patients') { renderPatients(); document.getElementById('mobile-header-title').textContent = 'Patients'; }
     if (view === 'stats') { currentStatsMonthOffset = 0; renderStats(); document.getElementById('mobile-header-title').textContent = 'Activité'; }
     if (view === 'reminders') { renderReminders(); document.getElementById('mobile-header-title').textContent = 'Rappels'; }
-    if (view === 'settings') { renderSettings(); document.getElementById('mobile-header-title').textContent = 'Réglages'; }
+    if (view === 'settings') { renderSettings(); setupSettingsAccordion(); document.getElementById('mobile-header-title').textContent = 'Réglages'; }
   }
 
   document.querySelectorAll('[data-view]').forEach(link => {
@@ -3162,6 +3162,32 @@ Règles :
       return `<button class="quick-soin-btn btn btn-primary btn-sm" data-id="${id}" title="Marquer le soin terminé">${checkSvg}<span class="ml-1.5 text-[12px]">Soin fait</span></button>`;
     }
     return '';
+  }
+
+  // P2-D — Réglages en accordéon : chaque section (.settings-toggle) replie son contenu (replié par défaut).
+  // Le corps d'une section = les éléments frères jusqu'au prochain .settings-toggle ou .settings-keep
+  // (le bouton "Enregistrer" est .settings-keep → toujours visible). N'altère AUCUN champ.
+  function setupSettingsAccordion() {
+    document.querySelectorAll('#view-settings .settings-toggle').forEach(h => {
+      if (h.dataset.accInit) return; // idempotent (appelé à chaque ouverture des Réglages)
+      h.dataset.accInit = '1';
+      const body = [];
+      let el = h.nextElementSibling;
+      while (el && !el.classList.contains('settings-toggle') && !el.classList.contains('settings-keep')) { body.push(el); el = el.nextElementSibling; }
+      h.classList.add('cursor-pointer', 'flex', 'items-center', 'justify-between', 'select-none', 'py-2');
+      const chev = document.createElement('span');
+      chev.style.cssText = 'color:#8E8E93;flex-shrink:0;margin-left:8px';
+      chev.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="transition:transform 150ms"><polyline points="9 18 15 12 9 6"/></svg>';
+      h.appendChild(chev);
+      const setOpen = (open) => {
+        body.forEach(b => b.classList.toggle('hidden', !open));
+        const svg = chev.querySelector('svg');
+        if (svg) svg.style.transform = open ? 'rotate(90deg)' : 'rotate(0deg)';
+        h.dataset.accOpen = open ? '1' : '0';
+      };
+      setOpen(false); // replié par défaut
+      h.addEventListener('click', () => setOpen(h.dataset.accOpen !== '1'));
+    });
   }
 
   // P1-C C2 — toggle Liste / Par patient (Cabinet) + bouton "+ Patient" (visible en mode patients)
