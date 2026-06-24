@@ -1398,9 +1398,11 @@
     if ('settings' in data && (typeof data.settings !== 'object' || Array.isArray(data.settings))) {
       return { ok: false, reason: 'champ "settings" présent mais pas un objet' };
     }
-    // Au moins une table doit être présente, sinon ce n'est pas un backup valide
-    const hasAnyData = arrayFields.some(f => Array.isArray(data[f]));
-    if (!hasAnyData) return { ok: false, reason: 'aucune table de données reconnue dans le fichier' };
+    // Un vrai backup contient AU MINIMUM patients + devis. Sinon on REFUSE : restaurer viderait
+    // patients/devis (clear inconditionnel) sans les recréer → perte totale depuis un fichier partiel.
+    if (!Array.isArray(data.patients) || !Array.isArray(data.devis)) {
+      return { ok: false, reason: 'sauvegarde incomplète (patients et devis obligatoires) — fichier refusé pour éviter une perte de données' };
+    }
     // Pour chaque devis, vérifier les champs minimum (sinon Dexie va casser à l'add)
     if (Array.isArray(data.devis)) {
       for (const d of data.devis) {
@@ -3012,9 +3014,10 @@ Règles :
       const _sendAll = document.getElementById('avis-send-all');
       if (_sendAll) _sendAll.onclick = async () => {
         _sendAll.disabled = true; _sendAll.textContent = 'Envoi…';
-        let ok = 0;
-        for (const it of _avisItems) { try { await sendReviewQueueItem(it.patient.id, it.devisId); ok++; } catch (e) {} }
-        toast(ok + ' mail' + (ok > 1 ? 's' : '') + ' d\'avis envoyé' + (ok > 1 ? 's' : '') + ' ✓', 'success');
+        let ok = 0, ko = 0;
+        for (const it of _avisItems) { try { await sendReviewQueueItem(it.patient.id, it.devisId); ok++; } catch (e) { ko++; } }
+        if (ko > 0) toast(ok + ' avis envoyé' + (ok > 1 ? 's' : '') + ', ' + ko + ' en échec (réessaie depuis la liste).', ok > 0 ? 'warning' : 'error');
+        else toast(ok + ' mail' + (ok > 1 ? 's' : '') + ' d\'avis envoyé' + (ok > 1 ? 's' : '') + ' ✓', 'success');
         scheduleAutoBackup(); renderDashboard();
       };
     } else {
@@ -5080,7 +5083,14 @@ Bien cordialement,`;
       if (tokens.expires_in && !tokens.expires_at) tokens.expires_at = Date.now() + tokens.expires_in * 1000;
       localStorage.setItem('melyia_google_tokens', JSON.stringify(tokens));
     },
-    isConnected() { const t = this.getTokens(); return !!(t && t.access_token); },
+    isConnected() {
+      const t = this.getTokens();
+      if (!t) return false;
+      if (t.refresh_token) return true;                 // on peut toujours rafraîchir → connecté
+      if (!t.access_token) return false;
+      if (t.expires_at && Date.now() > t.expires_at) return false; // access_token expiré + pas de refresh → déconnecté
+      return true;
+    },
     getUserInfo() { const t = this.getTokens(); return t ? t.userinfo : null; },
     async signIn() {
       const clientId = getSetting('googleClientId', '').trim();
@@ -5959,9 +5969,21 @@ Bien cordialement,`;
           const kvUrl = buildMonDevisKvUrl(devis.jeton, UTM_DEVIS);
           const oldUrl = buildMonDevisUrl(devis.jeton, pInfo, mdKeys, UTM_DEVIS);
           const bodyEl = document.getElementById('dcompose-body');
-          if (bodyEl) bodyEl.value = bodyEl.value.split(oldUrl).join(kvUrl);
+          if (bodyEl) {
+            if (bodyEl.value.indexOf(oldUrl) !== -1) {
+              bodyEl.value = bodyEl.value.split(oldUrl).join(kvUrl);
+            } else if (bodyEl.value.indexOf(kvUrl) === -1) {
+              // Lien d'origine retouché → on remplace tout lien /mon-devis|/comprendre-mon-devis présent par le lien KV.
+              bodyEl.value = bodyEl.value.replace(/https?:\/\/[^\s)>\]]*\/(?:mon-devis|comprendre-mon-devis)[^\s)>\]]*/g, kvUrl);
+            }
+          }
           const prev = document.getElementById('drecit-preview'); prev.href = kvUrl;
-          setStatus('✓ Page publiée — le lien du mail pointe vers le récit. Prévisualise puis envoie.', 'text-success');
+          // On ne rassure QUE si le lien premium est réellement dans le corps du mail.
+          if (bodyEl && bodyEl.value.indexOf(kvUrl) !== -1) {
+            setStatus('✓ Page publiée — le lien du mail pointe vers le récit. Prévisualise puis envoie.', 'text-success');
+          } else {
+            setStatus('✓ Page publiée, mais le lien n\'a pas pu être inséré tout seul. Colle ce lien dans le mail : ' + kvUrl, 'text-danger');
+          }
           toast('Page premium publiée ✓', 'success');
         } catch (e) {
           toast('Publication : ' + e.message, 'error');
@@ -6074,9 +6096,16 @@ Bien cordialement,`;
   // ========================================
   let _autoBackupTimer = null;
   let _backupFailNotified = false;
+  let _secondaryBackupNoted = false;
   function scheduleAutoBackup() {
     if (getSetting('autoBackupEnabled', '0') !== '1') return;
     if (!GoogleAuth.isConnected()) return;
+    // Multi-poste : SEUL le poste principal (émetteur) sauvegarde automatiquement. Sinon un poste secondaire
+    // (consultation maison/téléphone) écraserait sur Drive les devis saisis au cabinet (« dernier qui écrit gagne »).
+    if (!isSenderDevice()) {
+      if (!_secondaryBackupNoted) { _secondaryBackupNoted = true; toast('Poste secondaire : tes modifs ne sont pas sauvegardées sur Drive depuis ici (seul ton poste principal sauvegarde).', 'info'); }
+      return;
+    }
     if (_autoBackupTimer) clearTimeout(_autoBackupTimer);
     _autoBackupTimer = setTimeout(async () => {
       try {
@@ -6369,8 +6398,14 @@ Bien cordialement,`;
 
     let sentCount = 0;
     const errors = [];
+    const sentPatients = new Set(); // déonto : UN seul mail d'avis par patient et par passe (2 devis soin-terminé → 1 mail)
     for (const d of candidates) {
       try {
+        if (sentPatients.has(d.patient_id)) {
+          // Même patient déjà servi dans cette passe → on couvre le devis (verrou) sans renvoyer un 2e mail.
+          await db.devis.update(d.id, { googleReviewMailSent: true, googleReviewMailSentAt: new Date().toISOString() });
+          continue;
+        }
         const p = getCachedPatient(d.patient_id);
         const filled = template
           .replace(/\{\{salutation\}\}/g, buildSalutation(p))
@@ -6386,12 +6421,16 @@ Bien cordialement,`;
           googleReviewMailSent: true,
           googleReviewMailSentAt: new Date().toISOString()
         });
+        // Verrou UNIFIÉ au niveau patient (+ annule un avis programmé) → aucun autre chemin ne renverra un 2e avis.
+        try { await db.patients.update(d.patient_id, { googleReviewSentManuallyAt: new Date().toISOString(), reviewScheduledAt: null }); } catch (e) {}
+        sentPatients.add(d.patient_id);
         sentCount++;
       } catch (e) {
         errors.push({ devisId: d.id, error: e.message });
         console.error('[Melyia] Google review mail failed for devis', d.id, e);
       }
     }
+    if (sentPatients.size) { try { await refreshPatientsCache(); } catch (e) {} }
     setSetting('lastGoogleReviewCheckDate', today);
     if (sentCount > 0) {
       toast(`${sentCount} mail${sentCount > 1 ? 's' : ''} d'avis Google envoyé${sentCount > 1 ? 's' : ''} ✓`, 'success');
