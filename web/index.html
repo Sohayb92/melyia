@@ -1421,12 +1421,16 @@
     const tables = [db.devis, db.patients, db.relances];
     if (db.maintenances) tables.push(db.maintenances);
     if (db.rappels_maintenance) tables.push(db.rappels_maintenance);
+    if (db.pdfs) tables.push(db.pdfs);
     await db.transaction('rw', tables, async () => {
       await db.devis.clear();
       await db.patients.clear();
       await db.relances.clear();
       if (db.maintenances) await db.maintenances.clear();
       if (db.rappels_maintenance) await db.rappels_maintenance.clear();
+      // CONFIDENTIALITÉ : les PDF ne sont pas dans le backup ; on PURGE la table pdfs pour qu'un ancien
+      // fichier ne se re-rattache pas à un devis dont l'id a été réutilisé (→ risque de joindre le PDF d'un AUTRE patient).
+      if (db.pdfs) await db.pdfs.clear();
       if (data.patients) await db.patients.bulkAdd(data.patients);
       if (data.devis) await db.devis.bulkAdd(data.devis);
       if (data.relances) await db.relances.bulkAdd(data.relances);
@@ -1645,12 +1649,15 @@
   function recitBannedHit(recit) {
     const parts = [];
     if (recit && recit.objectif) parts.push(recit.objectif);
-    ((recit && recit.phases) || []).forEach(p => ((p && p.paragraphes) || []).forEach(x => parts.push(x)));
+    ((recit && recit.phases) || []).forEach(p => {
+      if (p && p.titre) parts.push(p.titre); // CONFIDENTIALITÉ : le titre de phase est affiché au patient → à scanner aussi
+      ((p && p.paragraphes) || []).forEach(x => parts.push(x));
+    });
     ((recit && recit.conseils) || []).forEach(x => parts.push(x));
     if (recit && recit.cloture) parts.push(recit.cloture);
     const joined = parts.join('  \n  ');
     const low = joined.toLowerCase();
-    const banned = ['dépose', 'depose', 'inlay core', 'faux moignon', 'désobturation', 'desobturation', 'rétroalvéolaire', 'retroalveolaire', 'mise en forme', 'sans reste à charge', 'sans reste a charge', 'alternative', '100% santé', '100% sante', '100 % santé', 'rac0', 'mutuelle', 'remboursement', 'reste à charge'];
+    const banned = ['dépose', 'depose', 'inlay core', 'faux moignon', 'désobturation', 'desobturation', 'rétroalvéolaire', 'retroalveolaire', 'mise en forme', 'sans reste à charge', 'sans reste a charge', 'alternative', '100% santé', '100% sante', '100 % santé', 'rac0', 'mutuelle', 'remboursement', 'reste à charge', 'prise en charge', 'sécurité sociale', 'securite sociale', 'cpam', 'assurance maladie'];
     for (const b of banned) { if (low.indexOf(b) !== -1) return b; }
     if (/\d[\d.,\s]*(?:€|euros?\b)/i.test(joined)) return 'un montant (€)';
     return null;
