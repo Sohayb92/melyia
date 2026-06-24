@@ -40,6 +40,9 @@ contextBridge.exposeInMainWorld('melyiaElectron', {
   // Notification système + tray dynamique
   notifyRelances: ({ count, names }) => ipcRenderer.invoke('notify-relances', { count, names }),
 
+  // Notification « nouveau devis détecté » (dossier surveillé, app en arrière-plan)
+  notifyNewDevis: ({ name }) => ipcRenderer.invoke('notify-new-devis', { name }),
+
   // Auto-updater (electron-updater + GitHub Releases)
   checkForUpdates: () => ipcRenderer.invoke('check-for-updates'),
   installUpdateNow: () => ipcRenderer.invoke('install-update-now'),
@@ -51,5 +54,9 @@ contextBridge.exposeInMainWorld('melyiaElectron', {
   pickWatchFolder: () => ipcRenderer.invoke('pick-watch-folder'),
   startWatchFolder: (folder) => ipcRenderer.invoke('start-watch-folder', folder),
   stopWatchFolder: () => ipcRenderer.invoke('stop-watch-folder'),
-  onWatchedDevis: (callback) => { ipcRenderer.on('watched-devis', (_, data) => callback(data)); }
+  onWatchedDevis: (callback) => { ipcRenderer.on('watched-devis', (_, data) => callback(data)); },
+  // Accusé de réception : le renderer a bien la file en mémoire → main peut déplacer le fichier (anti-perte)
+  ackWatchedDevis: (id) => ipcRenderer.send('watched-devis-ack', id),
+  // Clic sur la notification « nouveau devis » → ouvrir la modale d'import
+  onOpenWatchedImport: (callback) => { ipcRenderer.on('open-watched-import', () => callback()); }
 });

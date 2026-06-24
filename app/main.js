@@ -324,12 +324,14 @@ ipcMain.handle('extract-pdf-text', async (e, base64) => {
 });
 
 // ── Dossier surveillé : auto-import des devis PDF ───────────────────────────
-// Scan toutes les 12 s. Un PDF stable depuis >3 s est lu, DÉPLACÉ dans `_importés/`
-// (anti-doublon + safe multi-PC si dossier synchronisé), puis envoyé au renderer.
+// Scan toutes les 2,5 s. Un PDF dont la taille est STABLE sur 2 scans (copie terminée) est
+// envoyé au renderer ; il n'est DÉPLACÉ dans `_importés/` qu'après l'ACK du renderer (anti-perte).
 let watchTimer = null;
 let watchFolder = null;
-const WATCH_INTERVAL_MS = 12000;
+const WATCH_INTERVAL_MS = 2500;
 const WATCH_DONE_DIR = '_importés';
+const _watchSizes = new Map();   // filePath -> taille vue au scan précédent (détection « copie terminée »)
+const _watchPending = new Map(); // filePath -> { name, sentAt } : envoyé au renderer, en attente d'ACK avant déplacement
 
 function moveToImported(folder, filePath, fileName) {
   const doneDir = path.join(folder, WATCH_DONE_DIR);
@@ -344,21 +346,45 @@ function moveToImported(folder, filePath, fileName) {
 
 function scanWatchFolder() {
   if (!watchFolder || !mainWindow || mainWindow.isDestroyed()) return;
+  // Pendant un rechargement de page, le renderer raterait le message → on attend le prochain scan.
+  let loading = false;
+  try { loading = mainWindow.webContents.isLoading(); } catch (e) {}
   let entries;
   try { entries = fs.readdirSync(watchFolder, { withFileTypes: true }); } catch (e) { return; }
   const now = Date.now();
+  const seen = new Set();
   for (const ent of entries) {
     if (!ent.isFile() || !/\.pdf$/i.test(ent.name)) continue;
     const fp = path.join(watchFolder, ent.name);
     let st;
     try { st = fs.statSync(fp); } catch (e) { continue; }
-    if (now - st.mtimeMs < 3000) continue; // fichier peut-être encore en cours de copie
+    seen.add(fp);
+    // Déjà envoyé : on attend l'ACK avant de déplacer. Re-tentative si l'ACK n'arrive pas sous 20 s (renderer rechargé).
+    const pend = _watchPending.get(fp);
+    if (pend) { if (now - pend.sentAt < 20000) continue; _watchPending.delete(fp); }
+    // Stabilité : on n'importe que si la taille n'a pas bougé depuis le scan précédent (fichier copié en entier).
+    const prevSize = _watchSizes.get(fp);
+    if (prevSize === undefined || prevSize !== st.size) { _watchSizes.set(fp, st.size); continue; }
+    if (loading) continue;
     let base64;
     try { base64 = fs.readFileSync(fp).toString('base64'); } catch (e) { continue; }
-    try { moveToImported(watchFolder, fp, ent.name); } catch (e) { continue; } // si le déplacement échoue, on réessaiera (pas de double envoi)
-    try { mainWindow.webContents.send('watched-devis', { name: ent.name, base64 }); } catch (e) {}
+    // Envoi AVANT déplacement : le fichier ne quitte le dossier qu'une fois l'ACK du renderer reçu (anti-perte).
+    _watchPending.set(fp, { name: ent.name, sentAt: now });
+    try { mainWindow.webContents.send('watched-devis', { name: ent.name, base64, _id: fp }); }
+    catch (e) { _watchPending.delete(fp); }
   }
+  // Nettoyage des fichiers disparus (déplacés/supprimés à la main).
+  for (const k of _watchSizes.keys()) if (!seen.has(k)) _watchSizes.delete(k);
 }
+
+// ACK du renderer : il a la file en mémoire → on peut déplacer le PDF hors du dossier surveillé.
+ipcMain.on('watched-devis-ack', (e, id) => {
+  const pend = _watchPending.get(id);
+  if (!pend) return;
+  _watchPending.delete(id);
+  _watchSizes.delete(id);
+  try { moveToImported(watchFolder, id, pend.name); } catch (err) {} // si le déplacement échoue, le fichier reste : il sera re-détecté
+});
 
 function startWatchFolder(folder) {
   stopWatchFolder();
@@ -373,6 +399,8 @@ function startWatchFolder(folder) {
 function stopWatchFolder() {
   if (watchTimer) { clearInterval(watchTimer); watchTimer = null; }
   watchFolder = null;
+  _watchSizes.clear();
+  _watchPending.clear();
 }
 
 ipcMain.handle('pick-watch-folder', async () => {
@@ -421,6 +449,24 @@ ipcMain.handle('notify-relances', (e, { count, names }) => {
     notif.on('click', () => showWindow());
     notif.show();
   }
+  return true;
+});
+
+// Notification « nouveau devis détecté » (dossier surveillé, app en arrière-plan).
+// Clic → on affiche l'app et on demande au renderer d'ouvrir l'import.
+ipcMain.handle('notify-new-devis', (e, { name }) => {
+  if (!Notification.isSupported()) return false;
+  try {
+    const prefix = IS_DEV ? 'Melyia TEST' : 'Melyia';
+    const notif = new Notification({
+      title: `${prefix} — nouveau devis`,
+      body: `Devis détecté : ${name || 'devis.pdf'}. Clique pour le vérifier.`,
+      silent: false,
+      icon: getIcon()
+    });
+    notif.on('click', () => { showWindow(); try { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('open-watched-import'); } catch (err) {} });
+    notif.show();
+  } catch (err) { return false; }
   return true;
 });
 

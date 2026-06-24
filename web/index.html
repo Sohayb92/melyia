@@ -1973,7 +1973,35 @@ Règles :
   let _importQueue = []; // import multi-devis : les PDF restants à traiter, l'un après l'autre
   let _importBatchPatient = null; // patient choisi sur le 1er devis du lot → réutilisé pour les suivants (anti-doublon)
   let _autoLinkPromise = null; // liaison auto (async) du devis importé à un dossier existant → attendue avant l'enregistrement
-  function processNextImport() { const f = _importQueue.shift(); if (f) importDevisFromPdf(f); }
+  let _importingNow = false;   // un devis est en cours de lecture/ouverture → on n'en ouvre pas un 2e en parallèle
+  function processNextImport() {
+    if (_importingNow) { updateWatchedBadge(); return; }
+    const f = _importQueue.shift();
+    updateWatchedBadge();
+    if (!f) return;
+    _importingNow = true;
+    Promise.resolve(importDevisFromPdf(f)).catch(() => {}).finally(() => { _importingNow = false; });
+  }
+
+  // Pastille « N devis à vérifier » (dossier surveillé en arrière-plan) : visible, cliquable → ouvre l'import.
+  function updateWatchedBadge() {
+    const n = _importQueue.length;
+    let b = document.getElementById('watched-devis-badge');
+    if (n > 0) {
+      if (!b) {
+        b = document.createElement('button');
+        b.id = 'watched-devis-badge';
+        b.type = 'button';
+        b.style.cssText = 'position:fixed;right:18px;bottom:18px;z-index:99999;background:#115e59;color:#fff;border:none;border-radius:999px;padding:11px 17px;font:600 13px/1.2 system-ui,-apple-system,sans-serif;box-shadow:0 8px 24px rgba(0,0,0,.30);cursor:pointer;display:flex;align-items:center;gap:8px;';
+        b.addEventListener('click', () => { if (!_importingNow) processNextImport(); });
+        document.body.appendChild(b);
+      }
+      b.textContent = '🔔 ' + n + ' devis à vérifier';
+      b.style.display = 'flex';
+    } else if (b) {
+      b.style.display = 'none';
+    }
+  }
 
   // Import : si le patient relié au devis n'a pas d'email, on propose de l'ajouter tout de suite (au lieu d'un cul-de-sac).
   function proposeAddEmailThenSend(patient, devis) {
@@ -6497,27 +6525,35 @@ Bien cordialement,`;
       }
     });
 
-    // Dossier surveillé : un PDF déposé est injecté dans la file d'import (modale de vérif habituelle)
+    // Dossier surveillé : un PDF déposé est injecté dans la file d'import.
+    // Si Mélyia est DEVANT toi (et libre) → on ouvre la modale tout de suite.
+    // Sinon (arrière-plan) → on ne s'impose pas : notification Windows + pastille cliquable.
     if (window.melyiaElectron.onWatchedDevis) {
-      let _watchKick = null;
-      const _kickWatchImport = () => {
-        clearTimeout(_watchKick);
-        _watchKick = setTimeout(() => {
-          const busy = !document.getElementById('modal-form-overlay').classList.contains('hidden')
-                    || !document.getElementById('modal-detail-overlay').classList.contains('hidden');
-          if (!busy && _importQueue.length) processNextImport();
-        }, 600);
-      };
-      window.melyiaElectron.onWatchedDevis(({ name, base64 }) => {
+      window.melyiaElectron.onWatchedDevis(({ name, base64, _id }) => {
         try {
           const bin = atob(base64);
           const arr = new Uint8Array(bin.length);
           for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
           _importQueue.push(new File([arr], name || 'devis.pdf', { type: 'application/pdf' }));
-          toast('Nouveau devis détecté : ' + (name || 'devis.pdf'), 'info');
-          _kickWatchImport();
+          // ACK immédiat : le fichier ne quitte le dossier surveillé qu'une fois en sécurité dans la file (anti-perte).
+          if (_id && window.melyiaElectron.ackWatchedDevis) window.melyiaElectron.ackWatchedDevis(_id);
+          updateWatchedBadge();
+          const focused = document.hasFocus();
+          const busy = !document.getElementById('modal-form-overlay').classList.contains('hidden')
+                    || !document.getElementById('modal-detail-overlay').classList.contains('hidden')
+                    || _importingNow;
+          if (focused && !busy) {
+            processNextImport(); // tu es devant l'app et libre → on ouvre tout de suite
+          } else {
+            if (!focused && window.melyiaElectron.notifyNewDevis) window.melyiaElectron.notifyNewDevis({ name });
+            toast('Nouveau devis détecté — clique la pastille « devis à vérifier » quand tu veux', 'info');
+          }
         } catch (e) { toast('Devis surveillé illisible : ' + e.message, 'error'); }
       });
+      // Clic sur la notification Windows → on ouvre l'import en attente
+      if (window.melyiaElectron.onOpenWatchedImport) {
+        window.melyiaElectron.onOpenWatchedImport(() => { if (_importQueue.length && !_importingNow) processNextImport(); });
+      }
       const _wf = getSetting('watchFolderPath', '');
       if (_wf && window.melyiaElectron.startWatchFolder) window.melyiaElectron.startWatchFolder(_wf).catch(() => {});
     }
