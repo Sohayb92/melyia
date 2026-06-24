@@ -417,9 +417,11 @@ ipcMain.handle('stop-watch-folder', () => { stopWatchFolder(); return true; });
 // sans → Windows répondait « non activé » et la case se décochait toute seule. On aligne les deux.
 const AUTO_LAUNCH_OPTS = { path: process.execPath, args: ['--hidden'] };
 ipcMain.handle('get-auto-launch', () => {
+  if (IS_DEV) return false; // en DEV, process.execPath = electron.exe → réglage non pertinent
   try { return app.getLoginItemSettings(AUTO_LAUNCH_OPTS).openAtLogin; } catch (e) { return false; }
 });
 ipcMain.handle('set-auto-launch', (e, enabled) => {
+  if (IS_DEV) return false; // on n'enregistre pas electron.exe au démarrage Windows en DEV (entrée cassée)
   try {
     app.setLoginItemSettings({
       openAtLogin: !!enabled,
