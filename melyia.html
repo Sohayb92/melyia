@@ -1471,7 +1471,7 @@
     const ne = (data.email || '').toLowerCase().trim();
     if (!nn && !ne) return null;
     const all = await db.patients.toArray();
-    return all.find(p => {
+    const matches = all.filter(p => {
       const ep = _normPrenom(p.prenom);
       const en = (p.nom || '').toLowerCase().trim();
       const ee = (p.email || '').toLowerCase().trim();
@@ -1480,6 +1480,9 @@
       if (ne && ee && ne !== ee) return false;
       return true;
     });
+    // S'il existe plusieurs fiches pour la même personne (doublon), préférer celle qui a un email
+    // → évite un faux « pas d'email » quand on tombe sur la fiche dépourvue d'email.
+    return matches.find(p => p.email && p.email.trim()) || matches[0] || undefined;
   }
 
   async function searchPatients(query) {
@@ -1973,7 +1976,19 @@ Règles :
 
   let _importQueue = []; // import multi-devis : les PDF restants à traiter, l'un après l'autre
   let _importBatchPatient = null; // patient choisi sur le 1er devis du lot → réutilisé pour les suivants (anti-doublon)
+  let _autoLinkPromise = null; // liaison auto (async) du devis importé à un dossier existant → attendue avant l'enregistrement
   function processNextImport() { const f = _importQueue.shift(); if (f) importDevisFromPdf(f); }
+
+  // Import : si le patient relié au devis n'a pas d'email, on propose de l'ajouter tout de suite (au lieu d'un cul-de-sac).
+  function proposeAddEmailThenSend(patient, devis) {
+    if (!patient) { toast('Devis importé.', 'info'); return; }
+    toastConfirm('Devis importé — ce patient n\'a pas d\'email enregistré. L\'ajouter maintenant pour l\'envoyer ?', {
+      confirmLabel: 'Ajouter l\'email',
+      cancelLabel: 'Plus tard',
+      durationMs: 12000,
+      onConfirm: () => openPatientModal(patient)
+    });
+  }
 
   async function importDevisFromPdf(file) {
     if (!file) return;
@@ -2347,6 +2362,7 @@ Règles :
     document.getElementById('modal-form-overlay').classList.remove('hidden');
     document.body.style.overflow = 'hidden';
     selectedPatientForDevis = null;
+    _autoLinkPromise = null; // repart à zéro : une ancienne promesse de liaison ne doit pas traîner
     // Anti-fuite : hors import, on purge le contexte d'import laissé par un import précédent non envoyé (sinon le mauvais patient sans email colle au devis suivant).
     if (!prefill && !opts.keepImport) { pendingDevisPdf = null; _importBatchPatient = null; }
     document.getElementById('selected-patient-display').classList.add('hidden');
@@ -2381,8 +2397,9 @@ Règles :
         if (prefill.patientName && !prefilledPatient) {
           const pick = document.getElementById('patient-picker-input');
           if (pick) { pick.value = prefill.patientName; searchPatientsInPicker(prefill.patientName); }
-          // Relie automatiquement au dossier patient EXISTANT si correspondance exacte (nom + prénom)
-          (async () => {
+          // Relie automatiquement au dossier patient EXISTANT si correspondance exacte (nom + prénom).
+          // On garde la promesse : l'enregistrement l'attend (sinon race → devis relié au mauvais patient, ou perdu).
+          _autoLinkPromise = (async () => {
             try {
               const np = (prefill.patient && prefill.patient.prenom) || '';
               const nn = (prefill.patient && prefill.patient.nom) || '';
@@ -2438,7 +2455,7 @@ Règles :
     }
     if (saisir) saisir.addEventListener('click', () => { closeMenu(); openModal(); });
     if (importer && ii) importer.addEventListener('click', () => { closeMenu(); ii.click(); });
-    if (ii) ii.addEventListener('change', (e) => { const files = Array.from(e.target.files || []); e.target.value = ''; if (files.length) { _importQueue = files; _importBatchPatient = null; processNextImport(); } });
+    if (ii) ii.addEventListener('change', (e) => { const files = Array.from(e.target.files || []); e.target.value = ''; if (files.length) { _importQueue.push(...files); _importBatchPatient = null; processNextImport(); } });
   })();
   document.getElementById('open-new-btn-mobile').addEventListener('click', () => openModal());
   document.getElementById('cancel-modal').addEventListener('click', closeModal);
@@ -2471,6 +2488,7 @@ Règles :
   document.getElementById('devis-form').addEventListener('submit', async (e) => {
     e.preventDefault();
     await withBusyGuard('save-devis', async () => {
+    try { if (_autoLinkPromise) await _autoLinkPromise; } catch (e) {} // attendre la liaison auto au dossier existant avant de décider du patient
     if (!selectedPatientForDevis) {
       toast('Sélectionne ou crée un patient d\'abord', 'warning');
       return;
@@ -2514,15 +2532,18 @@ Règles :
       toast('Devis importé · ' + _importQueue.length + ' restant' + (_importQueue.length > 1 ? 's' : '') + '…', 'info');
       setTimeout(processNextImport, 300);
     } else if (pendingDevisPdf || _importBatchPatient) {
-      // C2 (modèle B) : fin de l'import → pop-up d'envoi DIRECT ; le groupé se reconstruit depuis les devis « En attente » non-envoyés du patient
-      const _impPatientRef = _importBatchPatient || selectedPatientForDevis;
-      // Fix : recharger le patient depuis la base — l'objet lié à l'import peut ne pas porter l'email (→ faux « pas d'email »)
-      let _impPatient = _impPatientRef;
-      if (_impPatientRef && _impPatientRef.id) { try { _impPatient = (await db.patients.get(_impPatientRef.id)) || _impPatientRef; } catch (e) {} }
+      // C2 (modèle B) : fin de l'import → pop-up d'envoi DIRECT ; le groupé se reconstruit depuis les devis « En attente » non-envoyés du patient.
+      // Le devis vient d'être relié à selectedPatientForDevis.id (cf. data.patient_id ci-dessus) : c'est CE patient,
+      // rechargé de la base, qui décide de l'envoi — JAMAIS _importBatchPatient (qui peut pointer un autre patient du lot → faux « pas d'email »).
+      const _sentPatientId = selectedPatientForDevis && selectedPatientForDevis.id;
+      let _impPatient = selectedPatientForDevis;
+      if (_sentPatientId) { try { _impPatient = (await db.patients.get(_sentPatientId)) || _impPatient; } catch (e) {} }
       const _impDevis = _proposeSendDevis ? _proposeSendDevis.devis : null;
       _importBatchPatient = null;
-      if (!_impPatient || !_impPatient.email) {
-        toast('Devis importé (pas d\'email patient → à envoyer depuis sa fiche).', 'info');
+      if (!_impPatient) {
+        toast('Devis importé.', 'info');
+      } else if (!_impPatient.email) {
+        proposeAddEmailThenSend(_impPatient, _impDevis); // pas de cul-de-sac : on propose d'ajouter l'email puis d'envoyer
       } else if (!GoogleAuth.isConnected()) {
         toast('Devis importé. Connecte-toi à Google pour l\'envoyer.', 'warning');
       } else if (_impDevis) {
