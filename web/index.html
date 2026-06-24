@@ -4765,7 +4765,12 @@ Bien cordialement,`;
     setSetting('googleReviewDelay', document.getElementById('setting-google-review-delay').value || '14');
     setSetting('googleReviewTemplate', document.getElementById('setting-google-review-template').value);
     if (window.melyiaElectron) {
-      window.melyiaElectron.setAutoLaunch(document.getElementById('setting-auto-launch').checked).catch(() => {});
+      const _wantLaunch = document.getElementById('setting-auto-launch').checked;
+      window.melyiaElectron.setAutoLaunch(_wantLaunch).then(actual => {
+        const cb = document.getElementById('setting-auto-launch');
+        if (cb) cb.checked = !!actual; // reflète l'état RÉEL (plus de case qui se redécoche toute seule)
+        if (_wantLaunch && !actual) toast('Démarrage avec Windows : impossible à activer sur ce PC (droits/registre Windows).', 'warning');
+      }).catch(() => {});
     }
     toast('Enregistré', 'success');
     setGreeting();

@@ -411,17 +411,24 @@ ipcMain.handle('pick-watch-folder', async () => {
 ipcMain.handle('start-watch-folder', (e, folder) => startWatchFolder(folder));
 ipcMain.handle('stop-watch-folder', () => { stopWatchFolder(); return true; });
 
-// Auto-launch Windows
+// Auto-launch Windows.
+// PIÈGE WINDOWS : getLoginItemSettings ne renvoie openAtLogin=true QUE si on lui passe les MÊMES
+// path + args que setLoginItemSettings. On enregistrait avec args ['--hidden'] mais on relisait
+// sans → Windows répondait « non activé » et la case se décochait toute seule. On aligne les deux.
+const AUTO_LAUNCH_OPTS = { path: process.execPath, args: ['--hidden'] };
 ipcMain.handle('get-auto-launch', () => {
-  return app.getLoginItemSettings().openAtLogin;
+  try { return app.getLoginItemSettings(AUTO_LAUNCH_OPTS).openAtLogin; } catch (e) { return false; }
 });
 ipcMain.handle('set-auto-launch', (e, enabled) => {
-  app.setLoginItemSettings({
-    openAtLogin: !!enabled,
-    openAsHidden: true,
-    args: ['--hidden']
-  });
-  return app.getLoginItemSettings().openAtLogin;
+  try {
+    app.setLoginItemSettings({
+      openAtLogin: !!enabled,
+      openAsHidden: true,        // macOS uniquement (ignoré sur Windows)
+      path: process.execPath,
+      args: ['--hidden']
+    });
+  } catch (err) { return false; }
+  try { return app.getLoginItemSettings(AUTO_LAUNCH_OPTS).openAtLogin; } catch (e) { return !!enabled; }
 });
 
 // Notification système + tray tooltip dynamique
