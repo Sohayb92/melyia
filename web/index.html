@@ -1685,25 +1685,54 @@
     overlay: "Overlay céramique", onlay: "Onlay céramique", facette: "Facette céramique", composite: "Composite", couronne: "Couronne", bridge: "Bridge", 'couronne-implant': "Couronne sur implant", amovible: "Prothèse amovible",
     carie: "Soin de carie", te: "Traitement de racine (dévitalisation)", rte: "Retraitement de racine", detartrage: "Détartrage", blanchiment: "Blanchiment", gouttiere: "Gouttière (bruxisme)"
   };
+  // Dents rattachées à chaque soin VALIDÉ. Suit le tag du praticien même s'il a corrigé le soin
+  // (ex. acte coté « couronne » mais en réalité un overlay) : les dents « orphelines » (d'un acte
+  // dont le soin n'est pas/plus coché) sont réaffectées au soin coché.
+  function dentsByValidatedKey(soinsText, validatedKeys) {
+    const keys = [...new Set((validatedKeys || []).filter(Boolean))];
+    const byKey = {};
+    const orphan = [];
+    const reDents = /([^()]+?)\s*\(([\d\s,]+)\)/g;
+    let m;
+    while ((m = reDents.exec(String(soinsText || '')))) {
+      const k = acteToSoinKey(m[1].replace(/^[\s,]+/, ''));
+      const teeth = m[2].split(/[\s,]+/).filter(Boolean);
+      if (k && keys.includes(k)) (byKey[k] = byKey[k] || []).push(...teeth);
+      else orphan.push(...teeth);
+    }
+    // Réaffecte les dents orphelines au soin validé sans dents (cas du tag corrigé couronne→overlay).
+    const sansDents = keys.filter(k => !(byKey[k] && byKey[k].length));
+    if (orphan.length && (sansDents.length === 1 || keys.length === 1)) {
+      (sansDents.length ? sansDents : keys).forEach(k => (byKey[k] = byKey[k] || []).push(...orphan));
+    }
+    keys.forEach(k => { if (byKey[k]) byKey[k] = [...new Set(byKey[k])]; });
+    return byKey;
+  }
+
   // Liste « plan de traitement » pour le mail : à partir des tags soins, sinon le texte libre.
   function buildPlanList(devis) {
     const keys = (devis && Array.isArray(devis.soinsKeys)) ? devis.soinsKeys.filter(Boolean) : [];
-    // Dents par soin : extraites du texte capté "Libellé (dents)" pour les rattacher au bon soin.
-    const dentsByKey = {};
     const soinsTxt = (devis && devis.soins) ? String(devis.soins) : '';
-    const reDents = /([^()]+?)\s*\(([\d\s,]+)\)/g;
-    let mDent;
-    while ((mDent = reDents.exec(soinsTxt))) {
-      const dk = acteToSoinKey(mDent[1].replace(/^[\s,]+/, ''));
-      if (!dk) continue;
-      (dentsByKey[dk] = dentsByKey[dk] || []).push(...mDent[2].split(/[\s,]+/).filter(Boolean));
-    }
-    if (keys.length) return keys.map(k => {
+    if (!keys.length) return soinsTxt;
+    const dentsByKey = dentsByValidatedKey(soinsTxt, keys);
+    return keys.map(k => {
       const label = SOIN_LABELS[k] || k;
-      const dents = [...new Set(dentsByKey[k] || [])];
+      const dents = dentsByKey[k] || [];
       return dents.length ? '- ' + label + ' (' + (dents.length > 1 ? 'dents ' : 'dent ') + dents.join(', ') + ')' : '- ' + label;
     }).join('\n');
-    return soinsTxt;
+  }
+
+  // Récit : la liste « Soin (dents) » construite à partir des soins VALIDÉS (cases cochées) — libellés
+  // propres, dents rattachées même après correction du tag. Ignore facturation + sous-étapes techniques.
+  function buildSoinsLineForRecit(soinsText, validatedKeys) {
+    const keys = [...new Set((validatedKeys || []).filter(Boolean))];
+    if (!keys.length) return String(soinsText || ''); // garde-fou
+    const byKey = dentsByValidatedKey(soinsText, keys);
+    return keys.map(k => {
+      const label = SOIN_LABELS[k] || k;
+      const teeth = byKey[k] || [];
+      return teeth.length ? label + ' (' + teeth.join(', ') + ')' : label;
+    }).join(', ');
   }
 
   // Signature plein texte (bloc Logos : collé en clair dans Logos, pas d'écrin HTML).
@@ -4584,24 +4613,6 @@ INTERDITS ABSOLUS
     try { const raw = getSetting('soinBank', ''); if (raw) return JSON.parse(raw); } catch (e) {}
     return DEFAULT_SOIN_BANK;
   }
-  // Récit : ne donne à l'IA que les actes dont le SOIN a été validé par le praticien (cases cochées).
-  // Jette les lignes de facturation, les sous-étapes techniques (clé null) et les soins décochés
-  // (ex. « assainissement paro » coté en dépassement). → décocher un soin le retire VRAIMENT partout.
-  function filterSoinsForRecit(soinsText, validatedKeys) {
-    const text = String(soinsText || '').trim();
-    if (!text) return text;
-    const keys = new Set((validatedKeys || []).filter(Boolean));
-    if (!keys.size) return text; // garde-fou : aucune clé validée → on ne touche pas
-    // Découpe « Libellé (dents), Libellé (dents)… » : coupe sur la virgule SUIVIE d'une lettre (pas d'un chiffre de dent).
-    const items = text.split(/,\s*(?=[A-Za-zÀ-ÿ])/);
-    const kept = items.filter(it => {
-      const libelle = it.replace(/\([^)]*\)/g, ' '); // retire « (dents) » avant le test de clé
-      const k = acteToSoinKey(libelle);
-      return k && keys.has(k); // ne garde que les actes dont le soin est coché
-    });
-    return kept.length ? kept.join(', ') : text; // garde-fou : si rien ne matche, on ne vide pas
-  }
-
   // Construit le bloc "textes de référence" injecté dans le prompt lia (uniquement les soins du devis).
   function buildSoinReference(soinsKeys) {
     const bank = getSoinBank();
@@ -5958,7 +5969,7 @@ Bien cordialement,`;
           const patientLabel = (titreOf(pInfo) ? titreOf(pInfo) + ' ' : '') + patientFullName(pInfo);
           const prompt = getSetting('recitPrompt', DEFAULT_RECIT_PROMPT)
             .split('{{patient}}').join(patientLabel)
-            .split('{{soins}}').join(filterSoinsForRecit(devis.soins || buildPlanList(devis), mdKeys))
+            .split('{{soins}}').join(buildSoinsLineForRecit(devis.soins || '', mdKeys))
             .split('{{notes}}').join(devis.notes ? String(devis.notes) : '(aucune)')
             .split('{{soinsKeys}}').join((mdKeys || []).join(', '))
             .split('{{reference}}').join(buildSoinReference(mdKeys));
