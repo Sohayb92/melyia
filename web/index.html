@@ -2778,7 +2778,8 @@ Règles :
         if (action === 'vulgarize-logos') {
           if (!devis.jeton) { devis.jeton = makeJeton(); try { await db.devis.update(id, { jeton: devis.jeton }); } catch (e) {} }
           closeDetail();
-          openVulgarizeModal(devis.soins || '', devis);
+          // Bloc Logos basé sur les SOINS VALIDÉS (tags) + dents → suit la correction couronne→overlay comme le reste.
+          openVulgarizeModal(buildSoinsLineForRecit(devis.soins || '', devis.soinsKeys) || devis.soins || '', devis);
           return;
         }
         if (action === 'copier-lien-patient') {
