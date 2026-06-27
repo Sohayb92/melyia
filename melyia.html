@@ -1895,6 +1895,7 @@ Règles :
   // Mappe un acte (libellé) vers une des 19 clés de soins (au mieux ; le Dr corrige le tag).
   function acteToSoinKey(libelle) {
     const l = (libelle || '').toLowerCase();
+    if (/^\s*(suppl[ée]ment|majoration|forfait)\b/.test(l)) return null; // ligne de cotation/facturation, jamais un soin patient
     if (/dépose|depose|rétroalvéolaire|retroalveolaire|radiograph/.test(l)) return null; // retrait / radio
     if (/inlay\s*core|faux moignon|tenon/.test(l)) return null; // reconstitution, pas un soin patient
     if (/onlay/.test(l)) return 'onlay';
@@ -4557,7 +4558,7 @@ RÈGLES
 4. NOMENCLATURE : nomme chaque dent en clair, position EN TOUTES LETTRES + numéro EN CHIFFRES entre parenthèses. Format exact : « la Première molaire en bas à droite (46) ». Jamais « dent 46 », jamais le numéro en lettres. Renseigne aussi "dents" (numéros) et "soinsKeys" (uniquement parmi les clés fournies) de chaque phase.
 5. LONGUEUR proportionnée à l'ENJEU, pas au nombre d'actes : objectif 1 phrase ; pourquoi 1-3 phrases ; déroulé 1-3 phrases ; récit total 180-320 mots pour un plan simple, 550 mots MAX. Aucun paragraphe de plus de 3 phrases.
 6. PARODONTITE (si une phase parodontale est présente) : explique en 1-2 phrases — maladie inflammatoire d'origine bactérienne touchant les tissus de soutien (gencive et os), avec perte progressive d'ancrage ; le traitement vise à stopper cette infection. Ajoute alors dans "conseils" : apporter sa brosse à dents électrique pour calibrer ensemble les brossettes interdentaires.
-7. DÉLAI / MISE EN OBSERVATION : ne chiffre JAMAIS un délai (ex. « environ 6 mois ») de ta propre initiative — UNIQUEMENT si le praticien l'a écrit dans {{notes}}. Ne décris une couronne provisoire « le temps de la cicatrisation » QUE si l'acte « couronne provisoire » est présent ou si {{notes}} l'indique. Formule l'inflammation par son BUT, jamais par la peur : « une petite inflammation s'est installée à l'extrémité de la racine ; la reprise du traitement vise précisément à la faire disparaître ».
+7. NOTES DU PRATICIEN = AUTORITÉ. Tout ce qui figure dans {{notes}} doit être intégré au récit EN PRIORITÉ et systématiquement (cause, délai, étape ou précision en plus, formulation souhaitée) — c'est le levier de personnalisation du praticien. À L'INVERSE, en l'ABSENCE d'indication dans {{notes}} : reste MINIMAL et ne mentionne JAMAIS, même si un acte ou un texte de référence l'évoque, ni couronne provisoire, ni pilier / reconstitution comme étape distincte, ni délai chiffré, ni la CAUSE d'un soin (carie, fêlure, amalgame, usure). Formule l'inflammation par son BUT, jamais par la peur : « une petite inflammation s'est installée à l'extrémité de la racine ; la reprise du traitement vise précisément à la faire disparaître ».
 8. CLÔTURE (champ "cloture") : invite le patient à indiquer quand il souhaite commencer → le secrétariat le rappellera pour fixer ensemble les rendez-vous, ou il peut appeler le cabinet ; termine par une phrase de disponibilité. NE PARLE PAS de mutuelle ni de remboursement dans la clôture.
 9. NIVEAU DE LANGUE : lectorat 6e-8e. Traduis tout jargon. Voix « je » médicale, chaleur SOBRE (pas de sirop, pas d'emoji, pas de « ne vous inquiétez pas »).
 
@@ -4576,7 +4577,7 @@ INTERDITS ABSOLUS
   const DEFAULT_SOIN_BANK = {
     rte: { titre: "Reprendre le traitement de la racine", pourquoi: "Cette dent a déjà bénéficié d'un traitement de racine par le passé. Avec le temps, ce traitement est devenu insuffisamment étanche, et une petite inflammation s'est installée à l'extrémité de la racine, le plus souvent sans douleur. La reprise du traitement vise précisément à la faire disparaître pour conserver la dent.", deroule: "Après le retrait de l'ancienne restauration, je procède au retraitement du canal : un nettoyage et une désinfection en profondeur du réseau de racines, sous contrôle radiographique, afin d'éliminer l'infection et de permettre à l'os de cicatriser." },
     te: { titre: "Traiter la racine de la dent", pourquoi: "La carie a atteint le nerf de la dent, ce qui peut entraîner douleur et infection. Le traitement de la racine a pour but de retirer ce nerf abîmé et d'assainir l'intérieur de la dent afin de la conserver.", deroule: "Je nettoie et désinfecte les canaux de la racine, puis je les referme hermétiquement. La dent, plus fragile, sera ensuite protégée." },
-    couronne: { titre: "Reconstituer et protéger la dent", pourquoi: "Une fois la racine assainie, la dent doit retrouver sa solidité et être protégée durablement, car elle devient plus fragile.", deroule: "Je reconstitue d'abord la dent à l'aide d'un ancrage qui en soutient la structure, puis je pose une couronne sur mesure qui la recoiffe et lui rend tout son rôle dans la mastication. Une couronne provisoire peut être posée le temps de la fabrication de la définitive." },
+    couronne: { titre: "Reconstituer et protéger la dent", pourquoi: "Une fois la racine assainie, la dent doit retrouver sa solidité et être protégée durablement, car elle devient plus fragile.", deroule: "Je pose sur la dent une couronne sur mesure qui la recoiffe entièrement et lui rend toute sa solidité et son rôle dans la mastication." },
     overlay: { titre: "Restaurer et renforcer la dent", pourquoi: "Cette dent a perdu de la matière (carie ou ancien amalgame infiltré, parfois avec des fêlures). Comme nous conservons une grande partie de la dent, l'objectif est de lui redonner sa résistance pour qu'elle supporte la mastication sans se fissurer.", deroule: "Je réalise sur mesure une pièce en céramique — un overlay — qui recouvre toute la surface de mastication de la dent et reconstitue le volume perdu, de façon solide, esthétique et durable. En englobant la dent, il la protège des fêlures et lui rend sa résistance." },
     onlay: { titre: "Restaurer et renforcer la dent", pourquoi: "Cette dent a perdu de la matière (carie ou ancien amalgame infiltré, parfois avec des fêlures). Comme nous conservons une grande partie de la dent, l'objectif est de lui redonner sa résistance pour qu'elle supporte la mastication sans se fissurer.", deroule: "Je réalise sur mesure une pièce en céramique — un onlay — qui recouvre la ou les pointes abîmées de la dent et reconstitue le volume perdu, de façon solide, esthétique et durable, en préservant le maximum de dent saine." },
     facette: { titre: "Embellir le sourire avec une facette", pourquoi: "Pour améliorer la forme, la couleur ou l'harmonie d'une dent visible et embellir le sourire, tout en préservant la dent.", deroule: "Je colle sur la face visible de la dent une fine pellicule de céramique réalisée sur mesure. Très peu de matière est retirée : la dent est préservée, le rendu naturel et durable." },
@@ -4602,6 +4603,24 @@ INTERDITS ABSOLUS
     try { const raw = getSetting('soinBank', ''); if (raw) return JSON.parse(raw); } catch (e) {}
     return DEFAULT_SOIN_BANK;
   }
+  // Récit : ne donne à l'IA que les actes dont le SOIN a été validé par le praticien (cases cochées).
+  // Jette les lignes de facturation, les sous-étapes techniques (clé null) et les soins décochés
+  // (ex. « assainissement paro » coté en dépassement). → décocher un soin le retire VRAIMENT partout.
+  function filterSoinsForRecit(soinsText, validatedKeys) {
+    const text = String(soinsText || '').trim();
+    if (!text) return text;
+    const keys = new Set((validatedKeys || []).filter(Boolean));
+    if (!keys.size) return text; // garde-fou : aucune clé validée → on ne touche pas
+    // Découpe « Libellé (dents), Libellé (dents)… » : coupe sur la virgule SUIVIE d'une lettre (pas d'un chiffre de dent).
+    const items = text.split(/,\s*(?=[A-Za-zÀ-ÿ])/);
+    const kept = items.filter(it => {
+      const libelle = it.replace(/\([^)]*\)/g, ' '); // retire « (dents) » avant le test de clé
+      const k = acteToSoinKey(libelle);
+      return k && keys.has(k); // ne garde que les actes dont le soin est coché
+    });
+    return kept.length ? kept.join(', ') : text; // garde-fou : si rien ne matche, on ne vide pas
+  }
+
   // Construit le bloc "textes de référence" injecté dans le prompt lia (uniquement les soins du devis).
   function buildSoinReference(soinsKeys) {
     const bank = getSoinBank();
@@ -5940,7 +5959,7 @@ Bien cordialement,`;
           const patientLabel = (titreOf(pInfo) ? titreOf(pInfo) + ' ' : '') + patientFullName(pInfo);
           const prompt = getSetting('recitPrompt', DEFAULT_RECIT_PROMPT)
             .split('{{patient}}').join(patientLabel)
-            .split('{{soins}}').join(devis.soins || buildPlanList(devis))
+            .split('{{soins}}').join(filterSoinsForRecit(devis.soins || buildPlanList(devis), mdKeys))
             .split('{{notes}}').join(devis.notes ? String(devis.notes) : '(aucune)')
             .split('{{soinsKeys}}').join((mdKeys || []).join(', '))
             .split('{{reference}}').join(buildSoinReference(mdKeys));
