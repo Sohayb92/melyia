@@ -1689,6 +1689,10 @@
     overlay: "Overlay céramique", onlay: "Onlay céramique", facette: "Facette céramique", composite: "Composite", couronne: "Couronne", bridge: "Bridge", 'couronne-implant': "Couronne sur implant", amovible: "Prothèse amovible",
     carie: "Soin de carie", te: "Traitement de racine (dévitalisation)", rte: "Retraitement de racine", detartrage: "Détartrage", blanchiment: "Blanchiment", gouttiere: "Gouttière (bruxisme)"
   };
+  // Soins « bouche entière » : pas de dent/localisation pertinente pour le patient (les sextants/dents
+  // du devis paro sont posés au hasard pour la cotation → on ne les montre PAS).
+  const NO_LOCATION_SOINS = new Set(['paro', 'maintenance-paro', 'detartrage', 'blanchiment', 'gouttiere']);
+
   // Dents rattachées à chaque soin VALIDÉ. Suit le tag du praticien même s'il a corrigé le soin
   // (ex. acte coté « couronne » mais en réalité un overlay) : les dents « orphelines » (d'un acte
   // dont le soin n'est pas/plus coché) sont réaffectées au soin coché.
@@ -1705,11 +1709,14 @@
       else orphan.push(...teeth);
     }
     // Réaffecte les dents orphelines au soin validé sans dents (cas du tag corrigé couronne→overlay).
-    const sansDents = keys.filter(k => !(byKey[k] && byKey[k].length));
+    const sansDents = keys.filter(k => !(byKey[k] && byKey[k].length) && !NO_LOCATION_SOINS.has(k));
     if (orphan.length && (sansDents.length === 1 || keys.length === 1)) {
-      (sansDents.length ? sansDents : keys).forEach(k => (byKey[k] = byKey[k] || []).push(...orphan));
+      (sansDents.length ? sansDents : keys).forEach(k => { if (!NO_LOCATION_SOINS.has(k)) (byKey[k] = byKey[k] || []).push(...orphan); });
     }
-    keys.forEach(k => { if (byKey[k]) byKey[k] = [...new Set(byKey[k])]; });
+    keys.forEach(k => {
+      if (NO_LOCATION_SOINS.has(k)) byKey[k] = [];           // bouche entière → aucune localisation
+      else if (byKey[k]) byKey[k] = [...new Set(byKey[k])];
+    });
     return byKey;
   }
 
