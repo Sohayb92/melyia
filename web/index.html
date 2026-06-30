@@ -2605,6 +2605,7 @@ Règles :
       // C2 (modèle B) : fin de l'import → pop-up d'envoi DIRECT ; le groupé se reconstruit depuis les devis « En attente » non-envoyés du patient.
       // Le devis vient d'être relié à selectedPatientForDevis.id (cf. data.patient_id ci-dessus) : c'est CE patient,
       // rechargé de la base, qui décide de l'envoi — JAMAIS _importBatchPatient (qui peut pointer un autre patient du lot → faux « pas d'email »).
+      const wasBatch = !!_importBatchPatient; // un devis précédent du lot a renseigné ça → import MULTIPLE
       const _sentPatientId = selectedPatientForDevis && selectedPatientForDevis.id;
       let _impPatient = selectedPatientForDevis;
       if (_sentPatientId) { try { _impPatient = (await db.patients.get(_sentPatientId)) || _impPatient; } catch (e) {} }
@@ -2616,6 +2617,10 @@ Règles :
         proposeAddEmailThenSend(_impPatient, _impDevis); // pas de cul-de-sac : on propose d'ajouter l'email puis d'envoyer
       } else if (!GoogleAuth.isConnected()) {
         toast('Devis importé. Connecte-toi à Google pour l\'envoyer.', 'warning');
+      } else if (wasBatch) {
+        // Import MULTIPLE : pas d'ouverture auto de la fenêtre d'envoi (évitait un overlay glité) →
+        // on pointe vers le bouton enveloppe « Envoyer le devis » du tableau (1 seul mail groupé).
+        toast('Devis importés ✓ — clique l\'enveloppe « Envoyer le devis » dans le tableau (un seul mail groupé).', 'success');
       } else if (_impDevis) {
         setTimeout(() => openComposeDevisSmart(_impDevis, _impPatient), 350);
       }
@@ -2945,13 +2950,14 @@ Règles :
       const googleReady = GoogleAuth.isConnected();
       document.getElementById('relances-list').innerHTML = relancesDues.map(d => {
         const isFirst = d.status === 'En attente';
+        const neverSent = isFirst && !d.devisMailSentAt; // jamais envoyé au patient → action = ENVOYER (pas relancer)
         const pInfo = devisPatientDisplay(d);
         // Bouton mail Mélyia si Google connecté + email patient présent ; sinon fallback "Marquer relancé"
         const canMailFromMelyia = isFirst && googleReady && !!(pInfo && pInfo.email);
         const mailIconSvg = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>';
         const dashIconSvg = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"/></svg>';
         const relanceBtnHtml = canMailFromMelyia
-          ? `<button class="mail-relance-btn btn btn-primary btn-sm !px-3" data-id="${d.id}" title="Relancer par mail (Mélyia)">${mailIconSvg}</button>`
+          ? `<button class="mail-relance-btn btn btn-primary btn-sm !px-3" data-id="${d.id}" title="${neverSent ? 'Envoyer le devis au patient' : 'Relancer par mail (Mélyia)'}">${mailIconSvg}</button>`
           : (isFirst
               ? `<button class="quick-relance-btn btn btn-secondary btn-sm !px-3" data-id="${d.id}" data-first="true" title="Marquer comme relancé (sans envoyer de mail)">${mailIconSvg}</button>`
               : `<button class="quick-relance-btn btn btn-secondary btn-sm !px-3" data-id="${d.id}" data-first="false" title="Sans réponse">${dashIconSvg}</button>`);
@@ -2960,7 +2966,7 @@ Règles :
             <div class="flex-1 min-w-0 cursor-pointer open-detail-btn" data-id="${d.id}">
               <div class="flex items-center gap-2">
                 <div class="text-[15px] font-semibold truncate">${esc(patientFullName(pInfo))}</div>
-                ${!isFirst ? '<span class="text-[10px] uppercase tracking-wider text-accent font-bold">Relance #2</span>' : ''}
+                ${neverSent ? '<span class="text-[10px] uppercase tracking-wider font-bold" style="color: var(--color-copper-600)">À envoyer</span>' : (!isFirst ? '<span class="text-[10px] uppercase tracking-wider text-accent font-bold">Relance #2</span>' : '')}
               </div>
               <div class="text-[13px] text-ink-500 truncate">${esc(d.soins)} ${d.montant ? '· ' + fmtMoney(d.montant) : ''}</div>
             </div>
@@ -3191,7 +3197,9 @@ Règles :
           toast('Pas d\'email pour ce patient', 'warning');
           return;
         }
-        openComposeRelanceModal(devis, pInfo);
+        // Jamais envoyé → envoi INITIAL du devis (pas une relance d'un devis que le patient n'a jamais reçu).
+        if (devis.status === 'En attente' && !devis.devisMailSentAt) openComposeDevisSmart(devis, pInfo);
+        else openComposeRelanceModal(devis, pInfo);
       });
     });
     document.querySelectorAll('.quick-action-btn').forEach(b => {
@@ -3277,7 +3285,8 @@ Règles :
     const checkSvg = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>';
     if (d.status === 'En attente' || d.status === 'Relancé') {
       const canMail = googleReady && !!(pInfo && pInfo.email);
-      const relance = canMail ? `<button class="mail-relance-btn btn btn-secondary btn-sm !px-2.5" data-id="${id}" title="Relancer par mail">${mailSvg}</button>` : '';
+      const neverSent = d.status === 'En attente' && !d.devisMailSentAt;
+      const relance = canMail ? `<button class="mail-relance-btn btn btn-secondary btn-sm !px-2.5" data-id="${id}" title="${neverSent ? 'Envoyer le devis' : 'Relancer par mail'}">${mailSvg}</button>` : '';
       return `${relance}<button class="quick-action-btn btn btn-success btn-sm !px-2.5" data-id="${id}" data-action="accepted" title="Marquer accepté">${checkSvg}</button>`;
     }
     if (d.status === 'Accepté' && !d.soinTermine) {
