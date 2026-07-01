@@ -1699,8 +1699,8 @@
     const reDents = /([^()]+?)\s*\(([\d\s,]+)\)/g;
     let m;
     while ((m = reDents.exec(String(soinsText || '')))) {
-      const k = acteToSoinKey(m[1].replace(/^[\s,]+/, ''));
       const teeth = m[2].split(/[\s,]+/).filter(Boolean);
+      const k = acteToSoinKey(m[1].replace(/^[\s,]+/, ''), teeth); // dents passées → extraction 18/28/38/48 = dds
       if (k && keys.includes(k)) (byKey[k] = byKey[k] || []).push(...teeth);
       else orphan.push(...teeth);
     }
@@ -1937,7 +1937,7 @@ Règles :
   function _devisNum(s) { return parseFloat(String(s).replace(/[\s  ]/g, '').replace(',', '.')); }
 
   // Mappe un acte (libellé) vers une des 19 clés de soins (au mieux ; le Dr corrige le tag).
-  function acteToSoinKey(libelle) {
+  function acteToSoinKey(libelle, dents) {
     const l = (libelle || '').toLowerCase();
     if (/^\s*(suppl[ée]ment|majoration|forfait)\b/.test(l)) return null; // ligne de cotation/facturation, jamais un soin patient
     if (/dépose|depose|rétroalvéolaire|retroalveolaire|radiograph/.test(l)) return null; // retrait / radio
@@ -1957,7 +1957,12 @@ Règles :
     if (/parodont|surfaçage|surfacage|débridement|debridement|assainissement/.test(l)) return 'paro';
     if (/sagesse/.test(l)) return 'dds';
     if (/couronne/.test(l)) return 'couronne';
-    if (/extraction|avulsion/.test(l)) return 'chirurgie-orale';
+    if (/extraction|avulsion|germe/.test(l)) {
+      // Dents 18/28/38/48 = 3es molaires = dents de sagesse, QUEL QUE SOIT le libellé (« dents permanentes », « germe retenu »…).
+      const teeth = (Array.isArray(dents) ? dents : String(dents || '').split(/[\s,]+/)).map(t => String(t).trim()).filter(Boolean);
+      if (teeth.length && teeth.every(t => /^[1-4]8$/.test(t))) return 'dds';
+      return 'chirurgie-orale';
+    }
     if (/composite/.test(l)) return 'composite';
     if (/amovible|stellite|adjointe/.test(l)) return 'amovible';
     if (/blanchiment|éclaircissement/.test(l)) return 'blanchiment';
@@ -2023,7 +2028,7 @@ Règles :
         if (nums && nums.length) { total_honoraires = _devisNum(nums[0]); total_reste = _devisNum(nums[nums.length - 1]); break; }
       }
     }
-    const soinsKeys = [...new Set(actes.map(a => acteToSoinKey(a.libelle)).filter(Boolean))];
+    const soinsKeys = [...new Set(actes.map(a => acteToSoinKey(a.libelle, a.dent)).filter(Boolean))];
     if (soinsKeys.includes('rte')) { const i = soinsKeys.indexOf('te'); if (i >= 0) soinsKeys.splice(i, 1); } // un retraitement couvre déjà l'endo
     return { patient: { nom, prenom }, numeroLogos, actes, soinsKeys, total_honoraires, total_reste_a_charge: total_reste };
   }
