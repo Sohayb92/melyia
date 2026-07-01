@@ -1716,7 +1716,17 @@
     return byKey;
   }
 
+  // Nom clair d'une dent (notation FDI 11-48) : « première molaire en bas à droite ».
+  function toothName(num) {
+    const s = String(num || '').trim();
+    if (!/^[1-4][1-8]$/.test(s)) return ''; // pas une dent FDI standard (sextant, etc.)
+    const quad = { '1': 'en haut à droite', '2': 'en haut à gauche', '3': 'en bas à gauche', '4': 'en bas à droite' }[s[0]];
+    const pos = { '1': 'incisive centrale', '2': 'incisive latérale', '3': 'canine', '4': 'première prémolaire', '5': 'deuxième prémolaire', '6': 'première molaire', '7': 'deuxième molaire', '8': 'dent de sagesse' }[s[1]];
+    return pos + ' ' + quad;
+  }
+
   // Liste « plan de traitement » pour le mail : à partir des tags soins, sinon le texte libre.
+  // Dents en TOUTES LETTRES + numéro (« première molaire en bas à droite (46) »).
   function buildPlanList(devis) {
     const keys = (devis && Array.isArray(devis.soinsKeys)) ? devis.soinsKeys.filter(Boolean) : [];
     const soinsTxt = (devis && devis.soins) ? String(devis.soins) : '';
@@ -1725,7 +1735,9 @@
     return keys.map(k => {
       const label = SOIN_LABELS[k] || k;
       const dents = dentsByKey[k] || [];
-      return dents.length ? '- ' + label + ' (' + (dents.length > 1 ? 'dents ' : 'dent ') + dents.join(', ') + ')' : '- ' + label;
+      if (!dents.length) return '- ' + label;
+      const named = dents.map(n => { const nm = toothName(n); return nm ? nm + ' (' + n + ')' : ('dent ' + n); }).join(', ');
+      return '- ' + label + ' — ' + named;
     }).join('\n');
   }
 
@@ -2592,22 +2604,23 @@ Règles :
       }
       toast('Devis enregistré', 'success');
     }
+    const _savedPatient = selectedPatientForDevis; // IMPORTANT : capturé AVANT closeModal(), qui remet selectedPatientForDevis à null
     closeModal();
     await refreshPatientsCache();
     renderDashboard();
     if (typeof scheduleAutoBackup === 'function') scheduleAutoBackup();
     if (_importQueue.length) {
       // Import multi-devis : on enchaîne, le patient du 1er devis est réutilisé pour les suivants (anti-doublon)
-      _importBatchPatient = selectedPatientForDevis;
+      _importBatchPatient = _savedPatient;
       toast('Devis importé · ' + _importQueue.length + ' restant' + (_importQueue.length > 1 ? 's' : '') + '…', 'info');
       setTimeout(processNextImport, 300);
     } else if (pendingDevisPdf || _importBatchPatient) {
       // C2 (modèle B) : fin de l'import → pop-up d'envoi DIRECT ; le groupé se reconstruit depuis les devis « En attente » non-envoyés du patient.
-      // Le devis vient d'être relié à selectedPatientForDevis.id (cf. data.patient_id ci-dessus) : c'est CE patient,
+      // Le devis vient d'être relié à _savedPatient.id (cf. data.patient_id ci-dessus) : c'est CE patient,
       // rechargé de la base, qui décide de l'envoi — JAMAIS _importBatchPatient (qui peut pointer un autre patient du lot → faux « pas d'email »).
       const wasBatch = !!_importBatchPatient; // un devis précédent du lot a renseigné ça → import MULTIPLE
-      const _sentPatientId = selectedPatientForDevis && selectedPatientForDevis.id;
-      let _impPatient = selectedPatientForDevis;
+      const _sentPatientId = _savedPatient && _savedPatient.id;
+      let _impPatient = _savedPatient;
       if (_sentPatientId) { try { _impPatient = (await db.patients.get(_sentPatientId)) || _impPatient; } catch (e) {} }
       const _impDevis = _proposeSendDevis ? _proposeSendDevis.devis : null;
       _importBatchPatient = null;
