@@ -1652,6 +1652,8 @@
 
   // Garde-fou : aucun terme banni / alternative / montant ne doit fuiter dans le récit patient.
   // Scanne UNIQUEMENT le texte narratif (objectif/phases/conseils/clôture), pas le champ `rac`.
+  // Termes techniques/administratifs BANNIS des communications patient (mail, page, récit).
+  const RECIT_BANNED_TERMS = ['dépose', 'depose', 'inlay core', 'inlay-core', 'faux moignon', 'désobturation', 'desobturation', 'rétroalvéolaire', 'retroalveolaire', 'mise en forme', 'sans reste à charge', 'sans reste a charge', 'alternative', '100% santé', '100% sante', '100 % santé', 'rac0', 'mutuelle', 'remboursement', 'reste à charge', 'prise en charge', 'sécurité sociale', 'securite sociale', 'cpam', 'assurance maladie'];
   function recitBannedHit(recit) {
     const parts = [];
     if (recit && recit.objectif) parts.push(recit.objectif);
@@ -1663,10 +1665,18 @@
     if (recit && recit.cloture) parts.push(recit.cloture);
     const joined = parts.join('  \n  ');
     const low = joined.toLowerCase();
-    const banned = ['dépose', 'depose', 'inlay core', 'faux moignon', 'désobturation', 'desobturation', 'rétroalvéolaire', 'retroalveolaire', 'mise en forme', 'sans reste à charge', 'sans reste a charge', 'alternative', '100% santé', '100% sante', '100 % santé', 'rac0', 'mutuelle', 'remboursement', 'reste à charge', 'prise en charge', 'sécurité sociale', 'securite sociale', 'cpam', 'assurance maladie'];
-    for (const b of banned) { if (low.indexOf(b) !== -1) return b; }
+    for (const b of RECIT_BANNED_TERMS) { if (low.indexOf(b) !== -1) return b; }
     if (/\d[\d.,\s]*(?:€|euros?\b)/i.test(joined)) return 'un montant (€)';
     return null;
+  }
+  // Fallback texte libre (soinsKeys vide) : si le texte brut contient un terme technique/administratif banni
+  // ou un montant, on ne l'envoie PAS au patient — on renvoie une phrase neutre. Sinon on garde le texte.
+  function safeFallbackSoins(text) {
+    const t = String(text || '').trim();
+    if (!t) return t;
+    const low = t.toLowerCase();
+    const leak = RECIT_BANNED_TERMS.some(b => low.indexOf(b) !== -1) || /\d[\d.,\s]*(?:€|euros?\b)/i.test(t);
+    return leak ? 'Le détail de vos soins figure sur le devis ci-joint.' : t;
   }
 
   // Agrège les clés de soins de TOUS les devis non-refusés d'un patient (multi-devis
@@ -1708,10 +1718,11 @@
       if (k && keys.includes(k)) (byKey[k] = byKey[k] || []).push(...teeth);
       else orphan.push(...teeth);
     }
-    // Réaffecte les dents orphelines au soin validé sans dents (cas du tag corrigé couronne→overlay).
+    // Réaffecte les dents orphelines UNIQUEMENT s'il existe UN SEUL soin validé sans dents (cas du tag corrigé
+    // couronne→overlay, ou comblement/dds coté via une ligne de facturation). On n'inonde JAMAIS un soin qui a déjà ses propres dents.
     const sansDents = keys.filter(k => !(byKey[k] && byKey[k].length) && !NO_LOCATION_SOINS.has(k));
-    if (orphan.length && (sansDents.length === 1 || keys.length === 1)) {
-      (sansDents.length ? sansDents : keys).forEach(k => { if (!NO_LOCATION_SOINS.has(k)) (byKey[k] = byKey[k] || []).push(...orphan); });
+    if (orphan.length && sansDents.length === 1) {
+      (byKey[sansDents[0]] = byKey[sansDents[0]] || []).push(...orphan);
     }
     keys.forEach(k => {
       if (NO_LOCATION_SOINS.has(k)) byKey[k] = [];           // bouche entière → aucune localisation
@@ -1734,7 +1745,7 @@
   function buildPlanList(devis) {
     const keys = (devis && Array.isArray(devis.soinsKeys)) ? devis.soinsKeys.filter(Boolean) : [];
     const soinsTxt = (devis && devis.soins) ? String(devis.soins) : '';
-    if (!keys.length) return soinsTxt;
+    if (!keys.length) return safeFallbackSoins(soinsTxt);
     const dentsByKey = dentsByValidatedKey(soinsTxt, keys);
     return keys.map(k => {
       const label = SOIN_LABELS[k] || k;
@@ -1749,7 +1760,7 @@
   // propres, dents rattachées même après correction du tag. Ignore facturation + sous-étapes techniques.
   function buildSoinsLineForRecit(soinsText, validatedKeys) {
     const keys = [...new Set((validatedKeys || []).filter(Boolean))];
-    if (!keys.length) return String(soinsText || ''); // garde-fou
+    if (!keys.length) return safeFallbackSoins(soinsText); // garde-fou (jamais de terme technique brut au patient)
     const byKey = dentsByValidatedKey(soinsText, keys);
     return keys.map(k => {
       const label = SOIN_LABELS[k] || k;
@@ -1945,7 +1956,7 @@ Règles :
     const l = (libelle || '').toLowerCase();
     if (/^\s*(suppl[ée]ment|majoration|forfait)\b/.test(l)) return null; // ligne de cotation/facturation, jamais un soin patient
     if (/dépose|depose|rétroalvéolaire|retroalveolaire|radiograph/.test(l)) return null; // retrait / radio
-    if (/inlay\s*core|faux moignon|tenon/.test(l)) return null; // reconstitution, pas un soin patient
+    if (/inlay[\s-]*core|faux moignon|tenon/.test(l) && !/couronne|overlay|onlay|bridge|facette/.test(l)) return null; // reconstitution SEULE (« inlay-core ») ; « couronne sur inlay-core » reste une couronne
     if (/onlay/.test(l)) return 'onlay';
     if (/overlay|inlay/.test(l)) return 'overlay';
     if (/facette/.test(l)) return 'facette';
@@ -2038,6 +2049,7 @@ Règles :
   }
 
   let _importQueue = []; // import multi-devis : les PDF restants à traiter, l'un après l'autre
+  const _watchedSeen = new Set(); // signatures des PDF surveillés déjà pris en file → anti-doublon si un ACK se perd (main.js re-scanne le même fichier au bout de 20 s)
   let _importBatchPatient = null; // patient choisi sur le 1er devis du lot → réutilisé pour les suivants (anti-doublon)
   let _autoLinkPromise = null; // liaison auto (async) du devis importé à un dossier existant → attendue avant l'enregistrement
   let _importingNow = false;   // un devis est en cours de lecture/ouverture → on n'en ouvre pas un 2e en parallèle
@@ -2084,6 +2096,8 @@ Règles :
   async function importDevisFromPdf(file) {
     if (!file) return;
     const _qn = _importQueue.length;
+    // Si un devis échoue (PDF illisible…), on ne bloque PAS le reste du lot : on enchaîne le suivant.
+    const _advanceIfMore = () => { if (_importQueue.length) { toast('On passe au devis suivant…', 'info'); setTimeout(processNextImport, 400); } };
     toast(_qn ? ('Lecture du devis… (' + (_qn + 1) + ' au total)') : 'Lecture du devis en cours…', 'info');
     try {
       const { base64, mimeType } = await fileToBase64(file);
@@ -2101,7 +2115,7 @@ Règles :
       } else { pdfDiag = 'version sans lecture PDF — redémarre Mélyia pour appliquer la mise à jour'; }
       // 2) Secours : IA (PDF sans couche texte, ou hors Electron).
       if (!data || !data.actes || !data.actes.length) {
-        if (!getSetting('apiKey', '')) { toast('Lecture PDF impossible (' + pdfDiag + ')', 'warning'); return; }
+        if (!getSetting('apiKey', '')) { toast('Lecture PDF impossible (' + pdfDiag + ')', 'warning'); _advanceIfMore(); return; }
         console.warn('[Melyia] import devis — repli IA, raison :', pdfDiag);
         toast('Lecture exacte indispo (' + pdfDiag + ') — tentative IA…', 'info');
         if (window._lastPdfText) {
@@ -2136,6 +2150,7 @@ Règles :
       toast('Devis lu — vérifie (surtout les tags soins) puis enregistre', 'success');
     } catch (e) {
       toast('Lecture du devis échouée : ' + e.message, 'error');
+      _advanceIfMore();
     }
   }
 
@@ -2848,26 +2863,28 @@ Règles :
           applyDevisUpdate(id, patch, { toastMsg: msg, undoPatch });
           return;
         }
-        // Autres actions (relancer, reopen, undo-soin-termine) — INCHANGÉES
-        if (action === 'relancer') {
-          await db.relances.add({ devis_id: id, date: new Date().toISOString() });
-          const abandonDays = parseInt(getSetting('abandonDays', '24'), 10) || 24;
-          await db.devis.update(id, { status: 'Relancé', date_relance_prevue: addDays(new Date(), abandonDays) });
-          toast('Relance enregistrée', 'success');
-        } else if (action === 'reopen') {
-          const relanceDays = parseInt(getSetting('relanceDays', '21'), 10) || 21;
-          // Reopen efface dateAcceptation/Refus/SansReponse pour ne pas polluer les stats events-based
-          await db.devis.update(id, { status: 'En attente', date_relance_prevue: addDays(new Date(), relanceDays), dateAcceptation: null, dateRefus: null, dateSansReponse: null });
-          toast('Remis en attente', 'success');
-        } else if (action === 'undo-soin-termine') {
-          await db.devis.update(id, { soinTermine: false, dateSoinTermine: null });
-          toast('Soin remis non terminé', 'info');
-        }
-        closeDetail();
-        renderDashboard();
-        // v2.5.11 — Re-render Stats si on est sur cette vue (le user ne voyait pas son acceptation de devis remonter)
-        if (isStatsViewActive()) renderStats();
-        scheduleAutoBackup();
+        // Autres actions (relancer, reopen, undo-soin-termine) — garde anti double-clic (double relance sinon)
+        await withBusyGuard('detail-action-' + id, async () => {
+          if (action === 'relancer') {
+            await db.relances.add({ devis_id: id, date: new Date().toISOString() });
+            const abandonDays = parseInt(getSetting('abandonDays', '24'), 10) || 24;
+            await db.devis.update(id, { status: 'Relancé', date_relance_prevue: addDays(new Date(), abandonDays) });
+            toast('Relance enregistrée', 'success');
+          } else if (action === 'reopen') {
+            const relanceDays = parseInt(getSetting('relanceDays', '21'), 10) || 21;
+            // Reopen efface dateAcceptation/Refus/SansReponse pour ne pas polluer les stats events-based
+            await db.devis.update(id, { status: 'En attente', date_relance_prevue: addDays(new Date(), relanceDays), dateAcceptation: null, dateRefus: null, dateSansReponse: null });
+            toast('Remis en attente', 'success');
+          } else if (action === 'undo-soin-termine') {
+            await db.devis.update(id, { soinTermine: false, dateSoinTermine: null });
+            toast('Soin remis non terminé', 'info');
+          }
+          closeDetail();
+          renderDashboard();
+          // v2.5.11 — Re-render Stats si on est sur cette vue (le user ne voyait pas son acceptation de devis remonter)
+          if (isStatsViewActive()) renderStats();
+          scheduleAutoBackup();
+        });
       });
     });
 
@@ -2888,6 +2905,7 @@ Règles :
       if (!confirm('Supprimer définitivement ce devis ?')) return;
       await db.devis.delete(id);
       await db.relances.where('devis_id').equals(id).delete();
+      try { await db.pdfs.where('devis_id').equals(id).delete(); } catch (e) {} // pas de PDF orphelin (confidentialité + place)
       toast('Devis supprimé', 'info');
       closeDetail();
       renderDashboard();
@@ -3188,6 +3206,11 @@ Règles :
         const id = parseInt(b.dataset.id, 10);
         const isFirst = b.dataset.first === 'true';
         if (isFirst) {
+          const _dv = all.find(x => x.id === id);
+          if (_dv && !_dv.devisMailSentAt) { // jamais envoyé → on ne « relance » pas un devis que le patient n'a jamais reçu
+            toast('Ce devis n\'a pas encore été envoyé au patient — envoie-le d\'abord (depuis sa fiche, ou ajoute-lui un email).', 'warning');
+            return;
+          }
           // "Marquer relancé" (log relance + reprogrammation) — INCHANGÉ : P1-B n'y touche pas
           withBusyGuard('quick-relance-' + id, async () => {
             await db.relances.add({ devis_id: id, date: new Date().toISOString() });
@@ -4473,9 +4496,11 @@ Règles :
         const tables = ['devis', 'relances', 'patients'];
         if (db.maintenances) tables.push('maintenances');
         if (db.rappels_maintenance) tables.push('rappels_maintenance');
+        if (db.pdfs) tables.push('pdfs');
         await db.transaction('rw', tables.map(t => db[t]), async () => {
           const devisIds = devisList.map(d => d.id);
           if (devisIds.length) await db.relances.where('devis_id').anyOf(devisIds).delete();
+          if (devisIds.length && db.pdfs) await db.pdfs.where('devis_id').anyOf(devisIds).delete(); // pas de PDF orphelin
           await db.devis.where('patient_id').equals(id).delete();
           if (db.maintenances) {
             const maintIds = maintList.map(m => m.id);
@@ -5866,6 +5891,14 @@ Bien cordialement,`;
     if (pInfo.noContact === true) { toast(patientFullName(pInfo) + ' a demandé à ne plus être sollicité (STOP).', 'warning'); return; }
     if (!devis.jeton) { devis.jeton = makeJeton(); try { await db.devis.update(devis.id, { jeton: devis.jeton }); } catch (e) {} }
     const mdKeys = await patientSoinsKeys(pInfo && pInfo.id, devis);
+    // Audit (confidentialité) : on recharge le PDF DE CE DEVIS depuis la base, jamais le global
+    // pendingDevisPdf — qui pourrait être le PDF d'un AUTRE patient importé juste avant.
+    let ownPdf = null;
+    if (!groupCtx && devis && devis.id) {
+      try { const _rec = await db.pdfs.where('devis_id').equals(devis.id).first(); if (_rec && _rec.base64) ownPdf = { name: _rec.name, base64: _rec.base64 }; } catch (e) {}
+    }
+    // Anti double-envoi : on note l'état « envoyé » à l'ouverture ; avant d'envoyer on relira la base.
+    const _openSentAt = devis.devisMailSentAt || null;
     const doctorName = (getSetting('doctorName', '') || '').trim() || 'Votre dentiste';
     const filled = getSetting('devisTemplate', DEFAULT_DEVIS_TEMPLATE)
       .replaceAll('{{salutation}}', buildSalutation(pInfo))
@@ -5935,7 +5968,7 @@ Bien cordialement,`;
         return;
       }
       if (f && f[0]) { pdfStatusEl.textContent = '✓ PDF joint : ' + f[0].name; pdfStatusEl.className = 'text-[12px] mt-1 ml-1 text-success'; }
-      else if (pendingDevisPdf && pendingDevisPdf.base64) { pdfStatusEl.textContent = "✓ Devis PDF attaché (depuis l'import) : " + (pendingDevisPdf.name || 'devis.pdf'); pdfStatusEl.className = 'text-[12px] mt-1 ml-1 text-success'; }
+      else if (ownPdf && ownPdf.base64) { pdfStatusEl.textContent = "✓ Devis PDF attaché (depuis l'import) : " + (ownPdf.name || 'devis.pdf'); pdfStatusEl.className = 'text-[12px] mt-1 ml-1 text-success'; }
       else { pdfStatusEl.textContent = '⚠ Aucun PDF — le mail partira SANS le devis officiel.'; pdfStatusEl.className = 'text-[12px] mt-1 ml-1 text-danger'; }
     }
     refreshPdfStatus();
@@ -5961,8 +5994,17 @@ Bien cordialement,`;
         } else if (file) {
           const dataB64 = await new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result).split(',')[1] || ''); r.onerror = rej; r.readAsDataURL(file); });
           attachments = [{ filename: file.name || 'devis.pdf', mimeType: 'application/pdf', dataB64 }];
-        } else if (pendingDevisPdf && pendingDevisPdf.base64) {
-          attachments = [{ filename: pendingDevisPdf.name || 'devis.pdf', mimeType: 'application/pdf', dataB64: pendingDevisPdf.base64 }];
+        } else if (ownPdf && ownPdf.base64) {
+          attachments = [{ filename: ownPdf.name || 'devis.pdf', mimeType: 'application/pdf', dataB64: ownPdf.base64 }];
+        }
+        // Anti double-envoi : si CE devis a été marqué « envoyé » depuis l'ouverture de la fenêtre
+        // (autre fenêtre, double-clic sur un autre poste), on demande confirmation avant de renvoyer.
+        if (!groupCtx && devis && devis.id) {
+          let _fresh = null; try { _fresh = await db.devis.get(devis.id); } catch (e) {}
+          if (_fresh && _fresh.devisMailSentAt && _fresh.devisMailSentAt !== _openSentAt) {
+            const _ok = await new Promise(res => toastConfirm('Ce devis vient d\'être envoyé au patient. Le renvoyer quand même ?', { confirmLabel: 'Renvoyer', onConfirm: () => res(true), onCancel: () => res(false) }));
+            if (!_ok) { sendBtn.disabled = false; sendBtn.textContent = orig; return; }
+          }
         }
         const userEmailFresh = getSetting('googleUserEmail', '') || userEmail;
         await Gmail.sendEmail({ to, subject, body, from: doctorName && userEmailFresh ? `${doctorName} <${userEmailFresh}>` : '', attachments });
@@ -6657,6 +6699,14 @@ Bien cordialement,`;
     if (window.melyiaElectron.onWatchedDevis) {
       window.melyiaElectron.onWatchedDevis(({ name, base64, _id }) => {
         try {
+          // Anti-doublon : si un ACK précédent s'est perdu, main.js re-scanne le MÊME fichier (mêmes octets)
+          // → on ne le remet PAS en file, mais on ré-ACK pour qu'il quitte enfin le dossier surveillé.
+          const _sig = (name || '') + ':' + (base64 ? base64.length : 0);
+          if (_watchedSeen.has(_sig)) {
+            if (_id && window.melyiaElectron.ackWatchedDevis) window.melyiaElectron.ackWatchedDevis(_id);
+            return;
+          }
+          _watchedSeen.add(_sig);
           const bin = atob(base64);
           const arr = new Uint8Array(bin.length);
           for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
