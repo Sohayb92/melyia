@@ -258,6 +258,13 @@
     <section id="view-dashboard" class="view active">
       <span id="greeting" class="hidden"></span><span id="today-date" class="hidden"></span>
 
+      <!-- Audit : bandeau santé sauvegarde (poste émetteur) — visible tant que le problème persiste -->
+      <div id="backup-health-banner" class="hidden mb-4 rounded-2xl border px-4 py-3 flex items-start gap-3" style="background:#FFF7ED;border-color:#FDBA74">
+        <span style="font-size:18px;line-height:1.3">⚠️</span>
+        <div class="flex-1 text-[13.5px] leading-snug" id="backup-health-text" style="color:#9A3412"></div>
+        <button id="backup-health-close" class="text-[13px] font-medium shrink-0" style="color:#9A3412" title="Masquer jusqu'au prochain démarrage">✕</button>
+      </div>
+
       <!-- (rangée "Aujourd'hui" déplacée sous les KPIs pipeline — voir plus bas) -->
 
       <!-- Relances dues card (priority) -->
@@ -2974,17 +2981,27 @@ Règles :
     // Relances dues — triées par date_relance_prevue ASC (les plus en retard en premier)
     // Exclut les patients ayant demandé STOP (compliance LCEN)
     const now = Date.now();
+    // Audit : un devis IMPORTÉ (PDF stocké) jamais envoyé au patient apparaît TOUT DE SUITE dans la carte
+    // (avant : invisible jusqu'à J+21 si le toast d'après-import était raté → patient sans devis pendant 3 semaines).
+    // Les devis saisis à la main (envoyés via Logos, hors Mélyia) ne sont PAS concernés : pas de fausse alerte.
+    const _isNeverSentImported = d => d.status === 'En attente' && !d.devisMailSentAt && d.pdfStored;
     const relancesDues = all.filter(d => {
       if (d.status !== 'En attente' && d.status !== 'Relancé') return false;
-      if (new Date(d.date_relance_prevue).getTime() > now) return false;
+      if (!_isNeverSentImported(d) && new Date(d.date_relance_prevue).getTime() > now) return false;
       const p = d.patient_id ? getCachedPatient(d.patient_id) : null;
       if (p && p.noContact === true) return false;
       return true;
-    }).sort((a, b) => new Date(a.date_relance_prevue).getTime() - new Date(b.date_relance_prevue).getTime());
+    }).sort((a, b) => {
+      // « Jamais envoyés » d'abord (le patient n'a encore RIEN reçu), puis les plus en retard
+      const na = _isNeverSentImported(a) ? 0 : 1, nb = _isNeverSentImported(b) ? 0 : 1;
+      if (na !== nb) return na - nb;
+      return new Date(a.date_relance_prevue).getTime() - new Date(b.date_relance_prevue).getTime();
+    });
     const relancesSection = document.getElementById('relances-section');
     if (relancesDues.length > 0) {
       relancesSection.classList.remove('hidden');
-      document.getElementById('relances-count-text').textContent = `${relancesDues.length} patient${relancesDues.length > 1 ? 's' : ''} à relancer`;
+      const _nbAEnvoyer = relancesDues.filter(_isNeverSentImported).length;
+      document.getElementById('relances-count-text').textContent = `${relancesDues.length} patient${relancesDues.length > 1 ? 's' : ''} à relancer` + (_nbAEnvoyer ? ` · dont ${_nbAEnvoyer} devis à envoyer` : '');
       const googleReady = GoogleAuth.isConnected();
       document.getElementById('relances-list').innerHTML = relancesDues.map(d => {
         const isFirst = d.status === 'En attente';
@@ -4998,15 +5015,9 @@ Bien cordialement,`;
 
   // Export / Import / Reset
   document.getElementById('export-json-btn').addEventListener('click', async () => {
-    const patients = await db.patients.toArray();
-    const devis = await db.devis.toArray();
-    const relances = await db.relances.toArray();
-    const settings = {};
-    for (let i = 0; i < localStorage.length; i++) {
-      const k = localStorage.key(i);
-      if (isSettingExportable(k)) settings[k] = localStorage.getItem(k);
-    }
-    const blob = new Blob([JSON.stringify({ patients, devis, relances, settings, exportedAt: new Date().toISOString() }, null, 2)], { type: 'application/json' });
+    // Audit : même contenu que le backup Drive (buildBackupJson) — l'ancien export omettait
+    // maintenances + rappels_maintenance → un réimport les EFFAÇAIT (restoreFromBackup vide ces tables).
+    const blob = new Blob([await buildBackupJson()], { type: 'application/json' });
     downloadBlob(blob, `melyia-backup-${new Date().toISOString().slice(0,10)}.json`);
   });
 
@@ -5470,10 +5481,18 @@ Bien cordialement,`;
       });
     },
     async cleanupOldBackups(keep = 15) {
-      const list = await this.listBackups();
+      // Audit : profondeur temporelle. Avant : 5 fichiers gardés, potentiellement tous du même jour
+      // → une erreur remarquée 2 jours plus tard n'avait plus de point de restauration sain.
+      // Maintenant : les `keep` plus récents + 1 backup par semaine (8 semaines) parmi les plus anciens.
+      const list = await this.listBackups(); // trié du plus récent au plus ancien
       if (list.length <= keep) return;
-      const toDelete = list.slice(keep);
-      for (const file of toDelete) { try { await this.deleteBackup(file.id); } catch (e) {} }
+      const keepIds = new Set(list.slice(0, keep).map(f => f.id));
+      const weekly = new Set();
+      for (const f of list.slice(keep)) {
+        const wk = Math.floor(new Date(f.createdTime).getTime() / (7 * 86400000)); // n° de semaine (epoch)
+        if (!weekly.has(wk) && weekly.size < 8) { weekly.add(wk); keepIds.add(f.id); } // le plus récent de chaque semaine
+      }
+      for (const file of list) { if (!keepIds.has(file.id)) { try { await this.deleteBackup(file.id); } catch (e) {} } }
     }
   };
 
@@ -6227,7 +6246,7 @@ Bien cordialement,`;
         await Drive.uploadBackup(json);
         // Bug #4 fix : track last successful push to detect "modifs locales pending" plus tard
         setSetting('lastSyncedToDrive', String(Date.now()));
-        Drive.cleanupOldBackups(5).catch(() => {});
+        Drive.cleanupOldBackups(15).catch(() => {}); // audit : 15 récents + 1/semaine (géré dans cleanupOldBackups)
         if (_backupFailNotified) { _backupFailNotified = false; toast('Sauvegarde Drive rétablie ✓', 'success'); }
         console.log('[Melyia] Auto-backup Drive ✓');
       } catch (e) {
@@ -6236,6 +6255,41 @@ Bien cordialement,`;
         if (!_backupFailNotified) { _backupFailNotified = true; toast('⚠ Sauvegarde Drive échouée — tes dernières modifs ne sont pas encore sauvegardées (vérifie ta connexion Google).', 'error'); }
       }
     }, 30000);
+  }
+
+  // Audit : watchdog sauvegarde — au démarrage du poste émetteur, bandeau PERSISTANT si les données
+  // ne sont plus sauvegardées (toggle éteint, Google déconnecté, ou aucun push réussi depuis 48 h
+  // alors qu'il y a des modifs). Le toast d'échec ne dure que 3 s : ici, ça reste affiché.
+  async function checkBackupHealth() {
+    try {
+      const banner = document.getElementById('backup-health-banner');
+      const textEl = document.getElementById('backup-health-text');
+      if (!banner || !textEl) return;
+      const closeBtn = document.getElementById('backup-health-close');
+      if (closeBtn && !closeBtn._wired) { closeBtn._wired = true; closeBtn.addEventListener('click', () => banner.classList.add('hidden')); }
+      if (!isSenderDevice()) return; // postes consultation : pas de sauvegarde ici, par design
+      const devisCount = await db.devis.count();
+      if (!devisCount) return; // rien à protéger
+      let msg = '';
+      if (getSetting('autoBackupEnabled', '0') !== '1') {
+        msg = 'La sauvegarde automatique Google Drive est DÉSACTIVÉE sur ce poste. Tes devis ne sont pas protégés — active-la dans Réglages → Sauvegarde.';
+      } else if (!GoogleAuth.isConnected()) {
+        msg = 'Google est déconnecté : la sauvegarde Drive ne tourne plus. Reconnecte-toi dans Réglages → Compte Google.';
+      } else {
+        const lastSync = parseInt(getSetting('lastSyncedToDrive', '0'), 10);
+        const lastMod = parseInt(getSetting('lastLocalModification', '0'), 10);
+        const h48 = 48 * 60 * 60 * 1000;
+        if (lastMod && lastMod > lastSync && Date.now() - (lastSync || 0) > h48) {
+          const jours = lastSync ? Math.round((Date.now() - lastSync) / 86400000) : null;
+          msg = jours
+            ? 'Dernière sauvegarde Drive réussie il y a ' + jours + ' jour' + (jours > 1 ? 's' : '') + ', avec des modifications depuis. Je réessaie maintenant — si ce message revient, vérifie ta connexion Google.'
+            : 'Aucune sauvegarde Drive réussie pour l\'instant alors que des données existent. Je réessaie maintenant — si ce message revient, vérifie ta connexion Google.';
+          scheduleAutoBackup(); // tentative immédiate
+        }
+      }
+      if (msg) { textEl.textContent = msg; banner.classList.remove('hidden'); }
+      else banner.classList.add('hidden');
+    } catch (e) { /* le watchdog ne doit jamais bloquer l'app */ }
   }
 
   // ========================================
@@ -7076,6 +7130,8 @@ Bien cordialement,`;
   });
 
   async function init() {
+    // Audit : demande au navigateur de NE PAS évincer IndexedDB sous pression de stockage (PWA téléphone/maison).
+    try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch (e) {}
     await refreshPatientsCache();
     setGreeting();
     renderDashboard();
@@ -7084,6 +7140,7 @@ Bien cordialement,`;
     setTimeout(checkRelancesOnStartup, 800);
     setTimeout(checkMorningDigest, 2000);
     setTimeout(checkDrivePull, 3000);
+    setTimeout(checkBackupHealth, 3500); // audit : bandeau si la sauvegarde ne tourne plus
     setTimeout(suggestStaleDevisCleanup, 5000);
     // E : plus d'envoi automatique des avis — ils se valident depuis la liste « Avis à envoyer » du dashboard.
     setTimeout(migratePdfsOnce, 2500); // migration PDF différée (best-effort : ne bloque jamais l'app)
