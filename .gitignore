@@ -25,3 +25,6 @@ node_modules/
 
 # Audit interne (rapport, constats sécurité, captures) — même statut que contexte/ : local only
 audit/
+
+# Claude Code local settings (perso)
+.claude/settings.local.json
