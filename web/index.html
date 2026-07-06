@@ -2326,6 +2326,8 @@ Règles :
     d.setDate(d.getDate() + days);
     return d.toISOString();
   }
+  // Minuit local d'une date → comparaisons « à la journée » (on ignore l'heure).
+  function dayStart(ts) { const d = new Date(ts); d.setHours(0, 0, 0, 0); return d.getTime(); }
 
   // Bug #6 fix : escape HTML safe pour tous les inputs user dans les template strings
   // Bug #5 fix : guard global anti-double-clic pour les opérations critiques (envoi mail, save)
@@ -6366,7 +6368,7 @@ Bien cordialement,`;
     const pats = patientsSnapshot || await db.patients.toArray();
     for (const p of pats) {
       if (seen.has(p.id)) continue;
-      if (!p.reviewScheduledAt || new Date(p.reviewScheduledAt).getTime() > now) continue;
+      if (!p.reviewScheduledAt || dayStart(p.reviewScheduledAt) > dayStart(now)) continue; // dû dès le début du jour programmé
       if (!p.email || p.noContact === true || p.googleReviewSentManuallyAt) continue;
       seen.add(p.id);
       items.push({ patient: p, devisId: null, label: 'avis programmé' });
@@ -6386,15 +6388,16 @@ Bien cordialement,`;
 
   async function getGoogleReviewCandidates(devisSnapshot) {
     const delay = Math.max(1, parseInt(getSetting('googleReviewDelay', '14'), 10) || 14);
-    const now = Date.now();
-    const cutoff = now - delay * 24 * 60 * 60 * 1000;
+    // Comparaison À LA JOURNÉE (pas à l'heure) : tous les avis dont le soin a été terminé le même
+    // jour deviennent « à envoyer » ensemble, dès l'ouverture ce jour-là (au lieu d'arriver au fil de la journée).
+    const cutoff = dayStart(Date.now()) - delay * 24 * 60 * 60 * 1000;
     // P1-A : snapshot fourni (renderDashboard) → filtre pur ; sinon lecture DB + cache (appelants standalone)
     let all = devisSnapshot;
     if (!all) { await refreshPatientsCache(); all = await db.devis.toArray(); }
     return all.filter(d => {
       if (!d.soinTermine || !d.dateSoinTermine) return false;
       if (d.googleReviewMailSent) return false;
-      if (new Date(d.dateSoinTermine).getTime() > cutoff) return false;
+      if (dayStart(d.dateSoinTermine) > cutoff) return false; // pas encore J+N (en jours calendaires)
       const p = d.patient_id ? getCachedPatient(d.patient_id) : null;
       if (!p || !p.email) return false;
       if (p.noContact === true) return false;
