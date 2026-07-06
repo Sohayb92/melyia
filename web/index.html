@@ -2192,13 +2192,23 @@ Règles :
     const el = document.createElement('div');
     el.className = 'toast toast-' + type;
     el.textContent = message;
+    // Audit ergonomie : une ERREUR ne doit pas s'évaporer en 3 s — elle reste 10 s, avec un ✕ pour fermer.
+    const isError = type === 'error';
+    if (isError) {
+      el.style.display = 'flex'; el.style.alignItems = 'center'; el.style.gap = '10px';
+      const x = document.createElement('button');
+      x.textContent = '✕';
+      x.style.cssText = 'background:transparent;color:rgba(255,255,255,0.85);border:none;font-size:14px;cursor:pointer;padding:2px 4px;flex-shrink:0';
+      x.addEventListener('click', () => el.remove());
+      el.appendChild(x);
+    }
     document.getElementById('toast-container').appendChild(el);
     setTimeout(() => {
       el.style.opacity = '0';
       el.style.transform = 'translate(-50%, -16px)';
       el.style.transition = 'all 0.25s';
       setTimeout(() => el.remove(), 250);
-    }, 3200);
+    }, isError ? 10000 : 3200);
   }
 
   function toastConfirm(message, { confirmLabel = 'Oui', cancelLabel = 'Plus tard', onConfirm, onCancel, durationMs = 10000, neutralLabel = null, onNeutral = null } = {}) {
@@ -2721,8 +2731,12 @@ Règles :
           <div class="text-[14px] font-medium text-right">${(devis.pdfStored || devis.pdfBase64) ? '📎 ' + esc(devis.pdfName || 'enregistré') : '<span class="text-ink-400">non enregistré</span>'}</div>
         </div>
         <div class="grouped-row">
-          <div class="text-[14px] text-ink-700">Envoyé le</div>
+          <div class="text-[14px] text-ink-700">Devis daté du</div>
           <div class="text-[14px] font-medium tabular-nums">${formatDate(devis.date_envoi)} <span class="text-ink-500">· ${timeAgo(devis.date_envoi)}</span></div>
+        </div>
+        <div class="grouped-row">
+          <div class="text-[14px] text-ink-700">Mail au patient</div>
+          <div class="text-[14px] font-medium tabular-nums">${devis.devisMailSentAt ? '✓ envoyé le ' + formatDate(devis.devisMailSentAt) : (devis.pdfStored ? '<span class="text-danger font-semibold">jamais envoyé</span>' : '<span class="text-ink-400">hors Mélyia (Logos)</span>')}</div>
         </div>
         ${(devis.status === 'En attente' || devis.status === 'Relancé') ? `
           <div class="grouped-row">
@@ -3016,6 +3030,9 @@ Règles :
           : (isFirst
               ? `<button class="quick-relance-btn btn btn-secondary btn-sm !px-3" data-id="${d.id}" data-first="true" title="Marquer comme relancé (sans envoyer de mail)">${mailIconSvg}</button>`
               : `<button class="quick-relance-btn btn btn-secondary btn-sm !px-3" data-id="${d.id}" data-first="false" title="Sans réponse">${dashIconSvg}</button>`);
+        // Audit ergonomie : retard visible (« dû depuis X j », comme la carte maintenance)
+        const _lateDays = Math.floor((now - new Date(d.date_relance_prevue).getTime()) / 86400000);
+        const dueLabel = _isNeverSentImported(d) ? '' : (_lateDays > 0 ? ` · <span class="text-danger font-medium">dû depuis ${_lateDays} j</span>` : ' · dû aujourd\'hui');
         return `
           <div class="px-4 py-3 flex items-center justify-between gap-3" data-row-id="${d.id}">
             <div class="flex-1 min-w-0 cursor-pointer open-detail-btn" data-id="${d.id}">
@@ -3023,10 +3040,11 @@ Règles :
                 <div class="text-[15px] font-semibold truncate">${esc(patientFullName(pInfo))}</div>
                 ${neverSent ? '<span class="text-[10px] uppercase tracking-wider font-bold" style="color: var(--color-copper-600)">À envoyer</span>' : (!isFirst ? '<span class="text-[10px] uppercase tracking-wider text-accent font-bold">Relance #2</span>' : '')}
               </div>
-              <div class="text-[13px] text-ink-500 truncate">${esc(d.soins)} ${d.montant ? '· ' + fmtMoney(d.montant) : ''}</div>
+              <div class="text-[13px] text-ink-500 truncate">${esc(d.soins)} ${d.montant ? '· ' + fmtMoney(d.montant) : ''}${dueLabel}</div>
             </div>
             <div class="flex gap-1.5">
               ${relanceBtnHtml}
+              ${_isNeverSentImported(d) ? '' : `<button class="snooze-relance-btn btn btn-secondary btn-sm !px-3" data-id="${d.id}" title="Reporter de 7 jours"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg></button>`}
               <button class="quick-action-btn btn btn-success btn-sm !px-3" data-id="${d.id}" data-action="accepted" title="Validé"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg></button>
             </div>
           </div>
@@ -3211,6 +3229,18 @@ Règles :
       b.addEventListener('click', (e) => {
         e.stopPropagation();
         openDetail(parseInt(b.dataset.id));
+      });
+    });
+    // Audit ergonomie : « Reporter 7 j » — la relance sort de la liste, avec Annuler
+    document.querySelectorAll('.snooze-relance-btn').forEach(b => {
+      b.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const id = parseInt(b.dataset.id, 10);
+        const _dv = all.find(x => x.id === id);
+        applyDevisUpdate(id, { date_relance_prevue: addDays(new Date(), 7) }, {
+          toastMsg: 'Relance reportée de 7 jours',
+          undoPatch: { date_relance_prevue: _dv ? _dv.date_relance_prevue : addDays(new Date(), 0) }
+        });
       });
     });
     document.querySelectorAll('.quick-relance-btn').forEach(b => {
@@ -4852,7 +4882,7 @@ Bien cordialement,`;
     updateGoogleStatus();
   }
 
-  document.getElementById('save-settings-btn').addEventListener('click', () => {
+  function saveSettingsFromForm() {
     setSetting('relanceDays', document.getElementById('setting-relance-days').value || '21');
     setSetting('abandonDays', document.getElementById('setting-abandon-days').value || '24');
     setSetting('doctorName', document.getElementById('setting-doctor-name').value.trim());
@@ -4883,6 +4913,13 @@ Bien cordialement,`;
     }
     toast('Enregistré', 'success');
     setGreeting();
+  }
+  document.getElementById('save-settings-btn').addEventListener('click', saveSettingsFromForm);
+  // Audit ergonomie : AUTO-enregistrement — un switch basculé ou un champ modifié n'est plus perdu
+  // si on oublie de cliquer « Enregistrer » (piège aggravé par les sections repliées).
+  // Les textareas (templates de mails) restent sur le bouton : on n'enregistre pas un texte en cours de frappe.
+  document.getElementById('view-settings').addEventListener('change', (e) => {
+    if (e.target && e.target.matches && e.target.matches('input:not([type="file"])')) saveSettingsFromForm();
   });
 
   // Dossier surveillé (auto-import) — Electron only ; inerte sur le web (window.melyiaElectron absent)
@@ -6363,7 +6400,7 @@ Bien cordialement,`;
     }
 
     body += `Pour chaque patient :\n`;
-    body += `1. Vérifie sur Doctolib (relances) → si RDV pris, marque "Accepté" dans Melyia\n`;
+    body += `1. Si le patient a pris RDV (planning secrétaire) → marque "Accepté" dans Melyia\n`;
     body += `2. Sinon, envoie une relance/rappel directement depuis Melyia\n\n`;
     body += `— Melyia`;
 
