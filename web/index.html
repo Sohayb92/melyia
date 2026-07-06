@@ -5156,7 +5156,13 @@ Bien cordialement,`;
   }
 
   // Re-check relances toutes les heures (utile si app reste ouverte)
-  setInterval(() => { checkRelancesOnStartup().catch(() => {}); }, 60 * 60 * 1000);
+  setInterval(() => {
+    checkRelancesOnStartup().catch(() => {});
+    // Fix récap matinal : il n'était vérifié qu'au DÉMARRAGE → une app qui vit des semaines dans le
+    // tray ne l'envoyait plus jamais. Ici : chaque heure à partir de 7 h, le garde « lastMorningDigestDate »
+    // (dans checkMorningDigest) assure 1 envoi max par jour.
+    if (new Date().getHours() >= 7) checkMorningDigest().catch(() => {});
+  }, 60 * 60 * 1000);
 
   // ========================================
   // KEYBOARD SHORTCUTS
