@@ -1457,18 +1457,9 @@
   // ========================================
   // PATIENTS HELPERS
   // ========================================
-  async function getPatient(id) {
-    if (!id) return null;
-    return await db.patients.get(id);
-  }
-
   function patientFullName(p) {
     if (!p) return 'Patient inconnu';
     return [p.prenom, p.nom].filter(Boolean).join(' ') || 'Sans nom';
-  }
-
-  function patientKey(prenom, nom, email) {
-    return `${(nom||'').toLowerCase().trim()}|${(prenom||'').toLowerCase().trim()}|${(email||'').toLowerCase().trim()}`;
   }
 
   // Détecte un patient existant qui ressemble à celui qu'on essaie de créer.
@@ -1507,9 +1498,6 @@
     });
   }
 
-  async function getDevisForPatient(patientId) {
-    return await db.devis.where('patient_id').equals(patientId).toArray();
-  }
 
   // ========================================
   // CIVILITÉ — détection auto du genre par prénom + override manuel
@@ -1583,14 +1571,6 @@
     return out.join('');
   }
 
-  // URL « Comprendre mon devis » filtrée sur les soins du devis (clés du site).
-  function buildComprendreUrl(soinsKeys, utm) {
-    const keys = (soinsKeys || []).filter(Boolean);
-    const qs = [];
-    if (keys.length) qs.push('soins=' + keys.map(encodeURIComponent).join(','));
-    if (utm) qs.push(utm);
-    return SITE_URL + '/comprendre-mon-devis' + (qs.length ? '?' + qs.join('&') : '');
-  }
 
   // URL « Je souhaite prendre rendez-vous » → page /rappel (le cabinet rappelle).
   function buildRappelUrl(jeton, utm, nom) {
@@ -2333,10 +2313,6 @@ Règles :
     return `il y a ${Math.floor(days/365)} an${Math.floor(days/365)>1?'s':''}`;
   }
 
-  function daysSince(d) {
-    if (!d) return 0;
-    return Math.floor((Date.now() - new Date(d).getTime()) / 86400000);
-  }
 
   function addDays(date, days) {
     const d = new Date(date);
@@ -2826,9 +2802,6 @@ Règles :
     document.body.style.overflow = 'hidden';
 
     document.getElementById('close-detail').addEventListener('click', closeDetail);
-    document.getElementById('modal-detail-overlay').addEventListener('click', (e) => {
-      if (e.target.id === 'modal-detail-overlay') closeDetail();
-    });
 
     document.querySelectorAll('.action-btn').forEach(btn => {
       btn.addEventListener('click', async () => {
@@ -2935,6 +2908,12 @@ Règles :
     document.getElementById('modal-detail-overlay').classList.add('hidden');
     document.body.style.overflow = '';
   }
+  // Audit perf : UN SEUL listener « clic hors modale → fermer », enregistré au boot.
+  // (Avant : chaque ouverture de modale en rajoutait un sur l'overlay permanent → accumulation
+  // sur une app qui vit des semaines dans le tray.)
+  document.getElementById('modal-detail-overlay').addEventListener('click', function (e) {
+    if (e.target && e.target.id === 'modal-detail-overlay') closeDetail();
+  });
 
   // ========================================
   // DASHBOARD RENDER
@@ -3929,7 +3908,7 @@ Règles :
 
   async function renderPatients() {
     await refreshPatientsCache();
-    const allPatients = await db.patients.toArray();
+    const allPatients = Array.from(patientsCache.values()); // audit perf : le cache vient d'être rempli, pas de 2e lecture
     const allDevis = await db.devis.toArray();
 
     const statsByPatient = new Map();
@@ -5771,9 +5750,6 @@ Bien cordialement,`;
     document.body.style.overflow = 'hidden';
 
     document.getElementById('mcompose-cancel').addEventListener('click', closeDetail);
-    document.getElementById('modal-detail-overlay').addEventListener('click', (e) => {
-      if (e.target.id === 'modal-detail-overlay') closeDetail();
-    });
     document.getElementById('mcompose-send').addEventListener('click', async () => {
       await withBusyGuard('send-maintenance', async () => {
       const to = document.getElementById('mcompose-to').value.trim();
@@ -6013,7 +5989,6 @@ Bien cordialement,`;
     document.getElementById('modal-detail-overlay').classList.remove('hidden');
     document.body.style.overflow = 'hidden';
     document.getElementById('dcompose-cancel').addEventListener('click', closeDetail);
-    document.getElementById('modal-detail-overlay').addEventListener('click', (e) => { if (e.target.id === 'modal-detail-overlay') closeDetail(); });
     // Indicateur PDF joint (vert = attaché, rouge = aucun)
     const pdfStatusEl = document.getElementById('dcompose-pdf-status');
     function refreshPdfStatus() {
@@ -6228,9 +6203,6 @@ Bien cordialement,`;
     document.body.style.overflow = 'hidden';
 
     document.getElementById('compose-cancel').addEventListener('click', closeDetail);
-    document.getElementById('modal-detail-overlay').addEventListener('click', (e) => {
-      if (e.target.id === 'modal-detail-overlay') closeDetail();
-    });
     document.getElementById('compose-send').addEventListener('click', async () => {
       await withBusyGuard('send-relance', async () => {
       const to = document.getElementById('compose-to').value.trim();
@@ -6327,6 +6299,25 @@ Bien cordialement,`;
       if (msg) { textEl.textContent = msg; banner.classList.remove('hidden'); }
       else banner.classList.add('hidden');
     } catch (e) { /* le watchdog ne doit jamais bloquer l'app */ }
+  }
+
+  // Audit (confidentialité + disque) : purge différée des PDF des devis CLOS depuis plus de 6 mois
+  // (Refusé / Sans réponse / soin terminé). Le PDF officiel vit dans Logos ; garder ici des PDF
+  // patients à vie n'apporte rien. Un devis rouvert re-proposera de joindre le PDF à l'envoi.
+  async function purgeOldClosedPdfs() {
+    try {
+      const cutoff = Date.now() - 183 * 86400000; // ~6 mois
+      const all = await db.devis.toArray();
+      for (const d of all) {
+        if (!d.pdfStored) continue;
+        const closedAt = d.soinTermine ? d.dateSoinTermine
+          : (d.status === 'Refusé' ? d.dateRefus
+          : (d.status === 'Sans réponse' ? d.dateSansReponse : null));
+        if (!closedAt || new Date(closedAt).getTime() > cutoff) continue;
+        const n = await db.pdfs.where('devis_id').equals(d.id).delete();
+        if (n) { await db.devis.update(d.id, { pdfStored: false }); console.log('[Melyia] PDF purgé (devis clos +6 mois) :', d.id); }
+      }
+    } catch (e) { /* best-effort */ }
   }
 
   // ========================================
@@ -7070,9 +7061,6 @@ Bien cordialement,`;
     document.body.style.overflow = 'hidden';
 
     document.getElementById('stale-cancel').addEventListener('click', closeDetail);
-    document.getElementById('modal-detail-overlay').addEventListener('click', (e) => {
-      if (e.target.id === 'modal-detail-overlay') closeDetail();
-    });
     document.getElementById('stale-apply').addEventListener('click', async () => {
       await withBusyGuard('stale-cleanup', async () => {
         const checked = document.querySelectorAll('.stale-cb:checked');
@@ -7135,9 +7123,6 @@ Bien cordialement,`;
     document.body.style.overflow = 'hidden';
 
     document.getElementById('soins-cancel').addEventListener('click', closeDetail);
-    document.getElementById('modal-detail-overlay').addEventListener('click', (e) => {
-      if (e.target.id === 'modal-detail-overlay') closeDetail();
-    });
     document.querySelectorAll('.soin-fait-btn').forEach(btn => {
       btn.addEventListener('click', async () => {
         const idx = parseInt(btn.dataset.idx, 10);
@@ -7181,6 +7166,7 @@ Bien cordialement,`;
     setTimeout(suggestStaleDevisCleanup, 5000);
     // E : plus d'envoi automatique des avis — ils se valident depuis la liste « Avis à envoyer » du dashboard.
     setTimeout(migratePdfsOnce, 2500); // migration PDF différée (best-effort : ne bloque jamais l'app)
+    setTimeout(purgeOldClosedPdfs, 6000); // audit : PDF des devis clos +6 mois → purgés (confidentialité)
     offerTemplatesMigrationV241();
     migrateMaintenanceTemplateNow();
     setTimeout(autoSendDueMaintenances, 4500);
