@@ -5978,7 +5978,7 @@ Bien cordialement,`;
             <button id="drecit-gen" type="button" class="text-[13px] text-accent font-semibold">Générer</button>
           </div>
           <p id="drecit-status" class="text-[12px] text-ink-500 mt-1 hidden"></p>
-          <textarea id="drecit-json" rows="9" class="input !text-[12px] mt-2 hidden" style="font-family:ui-monospace,Menlo,Consolas,monospace" placeholder="Récit (JSON) — relis et corrige le texte si besoin"></textarea>
+          <div id="drecit-fields" class="mt-2 hidden space-y-2.5"></div>
           <div id="drecit-actions" class="flex items-center gap-4 mt-2 hidden">
             <button id="drecit-publish" type="button" class="text-[13px] text-accent font-semibold">Publier + utiliser le lien</button>
             <a id="drecit-preview" href="#" target="_blank" rel="noopener" class="text-[13px] text-ink-500 underline">Prévisualiser</a>
@@ -6071,13 +6071,44 @@ Bien cordialement,`;
       });
     });
 
-    // --- Page premium (récit lia) : Générer → relire → Publier dans KV → lien du mail ---
+    // --- Page premium (récit lia) : Générer → relire en TEXTE SIMPLE → Publier dans KV → lien du mail ---
     const recitGenBtn = document.getElementById('drecit-gen');
     if (recitGenBtn) {
       const statusEl = document.getElementById('drecit-status');
-      const jsonEl = document.getElementById('drecit-json');
+      const fieldsEl = document.getElementById('drecit-fields');
       const actionsEl = document.getElementById('drecit-actions');
       const setStatus = (msg, cls) => { statusEl.classList.remove('hidden'); statusEl.textContent = msg; statusEl.className = 'text-[12px] mt-1 ' + (cls || 'text-ink-500'); };
+      // Le Dr relit du FRANÇAIS, jamais du JSON : le récit généré est éclaté en champs de texte,
+      // et recomposé à la publication. _recitDraft garde la structure complète (dents, soinsKeys…)
+      // pour que les champs techniques non montrés soient préservés tels quels.
+      let _recitDraft = null;
+      function renderRecitFields(recit) {
+        let h = `<div><label class="text-[12px] font-semibold text-ink-700 block mb-1">Objectif (intro)</label><textarea data-recit="objectif" rows="2" class="input !text-[13px]">${esc(recit.objectif || '')}</textarea></div>`;
+        (recit.phases || []).forEach((p, i) => {
+          h += `<div class="rounded-lg p-2.5" style="background:#F3F2EE">
+            <label class="text-[12px] font-semibold text-ink-700 block mb-1">Phase ${i + 1} — titre</label>
+            <input data-recit="phase-titre-${i}" type="text" class="input !text-[13px]" value="${esc(p.titre || '')}"/>
+            <label class="text-[12px] font-semibold text-ink-700 block mb-1 mt-2">Texte (saute une ligne entre deux paragraphes)</label>
+            <textarea data-recit="phase-paras-${i}" rows="5" class="input !text-[13px]">${esc((p.paragraphes || []).join('\n\n'))}</textarea>
+          </div>`;
+        });
+        h += `<div><label class="text-[12px] font-semibold text-ink-700 block mb-1">Conseils (un par ligne, vide = aucun)</label><textarea data-recit="conseils" rows="2" class="input !text-[13px]">${esc((recit.conseils || []).join('\n'))}</textarea></div>`;
+        h += `<div><label class="text-[12px] font-semibold text-ink-700 block mb-1">Mot de clôture</label><textarea data-recit="cloture" rows="3" class="input !text-[13px]">${esc(recit.cloture || '')}</textarea></div>`;
+        fieldsEl.innerHTML = h;
+        fieldsEl.classList.remove('hidden');
+      }
+      function collectRecitFields() {
+        const r = JSON.parse(JSON.stringify(_recitDraft));
+        const get = k => { const el = fieldsEl.querySelector(`[data-recit="${k}"]`); return el ? el.value : ''; };
+        r.objectif = get('objectif').trim();
+        (r.phases || []).forEach((p, i) => {
+          p.titre = get('phase-titre-' + i).trim();
+          p.paragraphes = get('phase-paras-' + i).split(/\n\s*\n/).map(s => s.trim()).filter(Boolean); // ligne vide = nouveau paragraphe
+        });
+        r.conseils = get('conseils').split('\n').map(s => s.trim()).filter(Boolean);
+        r.cloture = get('cloture').trim();
+        return r;
+      }
       recitGenBtn.addEventListener('click', () => withBusyGuard('recit-gen', async () => {
         if (!getSetting('apiKey', '')) { toast('Clé API Gemini manquante (Réglages)', 'warning'); return; }
         recitGenBtn.disabled = true; const o = recitGenBtn.textContent; recitGenBtn.textContent = '…';
@@ -6094,11 +6125,10 @@ Bien cordialement,`;
           recit.salutation = buildSalutation(pInfo);
           recit.nom = patientFullName(pInfo);
           recit.jeton = devis.jeton;
-          const rac = fmtRac(devis.montant);
-          jsonEl.value = JSON.stringify(recit, null, 2);
-          jsonEl.classList.remove('hidden');
+          _recitDraft = recit;
+          renderRecitFields(recit);
           actionsEl.classList.remove('hidden');
-          setStatus('✓ Récit généré — relis, puis « Publier + utiliser le lien ».', 'text-success');
+          setStatus('✓ Récit généré — relis et corrige les textes, puis « Publier + utiliser le lien ».', 'text-success');
           recitGenBtn.textContent = 'Régénérer';
         } catch (e) {
           setStatus('Erreur : ' + e.message, 'text-danger');
@@ -6107,8 +6137,8 @@ Bien cordialement,`;
         } finally { recitGenBtn.disabled = false; }
       }));
       document.getElementById('drecit-publish').addEventListener('click', () => withBusyGuard('recit-publish', async () => {
-        let recit;
-        try { recit = JSON.parse(jsonEl.value); } catch (e) { toast('JSON invalide — corrige le texte (guillemets / virgules).', 'error'); return; }
+        if (!_recitDraft) { toast('Génère d\'abord le récit (bouton « Générer »).', 'warning'); return; }
+        const recit = collectRecitFields(); // recompose le récit depuis les champs texte — plus jamais de JSON à relire
         recit.jeton = devis.jeton;
         recit.salutation = recit.salutation || buildSalutation(pInfo);
         recit.nom = recit.nom || patientFullName(pInfo);
