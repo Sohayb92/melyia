@@ -100,22 +100,15 @@ async function takeScreenshot(view = 'dashboard', isMobile = false) {
   if (view === 'stats') {
     await clickNav('stats');
   } else if (view === 'patient-detail') {
-    await clickNav('patients');
-    // Ouvrir le 1er patient via clic sur sa carte
-    await new Promise(r => setTimeout(r, 400));
+    // La vue « Patients » n'existe plus (fusionnée dans Cabinet, mode « Par patient ») :
+    // on ouvre directement la fiche du patient mock via la fonction globale de l'app.
     const opened = await page.evaluate(() => {
-      const patientCards = document.querySelectorAll('.patient-card, [data-patient-id], .open-patient-btn');
-      if (patientCards.length > 0) {
-        patientCards[0].click();
-        return true;
-      }
-      // Fallback : essayer un selector plus large
-      const firstClickable = document.querySelector('#patients-list > div, #patients-list a');
-      if (firstClickable) { firstClickable.click(); return true; }
-      return false;
+      if (typeof openPatientDetail !== 'function') return false;
+      openPatientDetail(1); // Sophie MARTIN (mock id 1) — pas de await : on laisse la modale s'ouvrir puis on attend côté script
+      return true;
     });
-    if (!opened) console.warn('⚠ Impossible d\'ouvrir la fiche patient (selector pas trouvé)');
-    await new Promise(r => setTimeout(r, 800));
+    if (!opened) console.warn('⚠ Impossible d\'ouvrir la fiche patient (openPatientDetail introuvable)');
+    await new Promise(r => setTimeout(r, 1200));
   } else if (view === 'settings') {
     await clickNav('settings');
   }
