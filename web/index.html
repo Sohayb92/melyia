@@ -1795,8 +1795,8 @@ Chirurgien-dentiste — Cabinet Dentaire La Cabane
   async function getMaintenancesDues(maintSnapshot) {
     // P1-A : si le snapshot mémoire est fourni (renderDashboard) → filtre pur, sinon lecture DB (appelants standalone)
     const all = maintSnapshot || await db.maintenances.toArray();
-    const now = Date.now();
-    return all.filter(m => m.actif === 1 && new Date(m.prochain_rappel).getTime() <= now);
+    const today = dayStart(Date.now()); // à la journée : la carte est complète dès la 1re ouverture du jour
+    return all.filter(m => m.actif === 1 && dayStart(m.prochain_rappel) <= today);
   }
 
   async function snoozeMaintenanceFromToday(maintenanceId) {
@@ -2808,7 +2808,7 @@ Règles :
         const action = btn.dataset.action;
         if (action === 'toggle-more') { const m = document.getElementById('more-actions'); if (m) m.classList.toggle('hidden'); return; }
         if (action === 'send-mail-relance') {
-          openComposeRelanceModal(devis, pInfo);
+          openComposeRelanceSmart(devis, pInfo); // 1 seul mail si le patient a plusieurs devis dus
           return;
         }
         if (action === 'envoyer-devis') {
@@ -2978,9 +2978,10 @@ Règles :
     // (avant : invisible jusqu'à J+21 si le toast d'après-import était raté → patient sans devis pendant 3 semaines).
     // Les devis saisis à la main (envoyés via Logos, hors Mélyia) ne sont PAS concernés : pas de fausse alerte.
     const _isNeverSentImported = d => d.status === 'En attente' && !d.devisMailSentAt && d.pdfStored;
+    const _today = dayStart(now); // à la journée : la carte est complète dès la 1re ouverture du jour
     const relancesDues = all.filter(d => {
       if (d.status !== 'En attente' && d.status !== 'Relancé') return false;
-      if (!_isNeverSentImported(d) && new Date(d.date_relance_prevue).getTime() > now) return false;
+      if (!_isNeverSentImported(d) && dayStart(d.date_relance_prevue) > _today) return false;
       const p = d.patient_id ? getCachedPatient(d.patient_id) : null;
       if (p && p.noContact === true) return false;
       return true;
@@ -3010,8 +3011,11 @@ Règles :
               ? `<button class="quick-relance-btn btn btn-secondary btn-sm !px-3" data-id="${d.id}" data-first="true" title="Marquer comme relancé (sans envoyer de mail)">${mailIconSvg}</button>`
               : `<button class="quick-relance-btn btn btn-secondary btn-sm !px-3" data-id="${d.id}" data-first="false" title="Sans réponse">${dashIconSvg}</button>`);
         // Audit ergonomie : retard visible (« dû depuis X j », comme la carte maintenance)
-        const _lateDays = Math.floor((now - new Date(d.date_relance_prevue).getTime()) / 86400000);
+        const _lateDays = Math.floor((_today - dayStart(d.date_relance_prevue)) / 86400000);
         const dueLabel = _isNeverSentImported(d) ? '' : (_lateDays > 0 ? ` · <span class="text-danger font-medium">dû depuis ${_lateDays} j</span>` : ' · dû aujourd\'hui');
+        // Plusieurs devis dus pour ce patient → 1 SEUL mail les couvrira tous (openComposeRelanceSmart)
+        const _sameP = d.patient_id ? relancesDues.filter(x => x.patient_id === d.patient_id && !_isNeverSentImported(x)).length : 1;
+        const groupLabel = (!_isNeverSentImported(d) && _sameP > 1) ? ` · <span class="text-accent font-medium">${_sameP} devis → 1 mail</span>` : '';
         return `
           <div class="px-4 py-3 flex items-center justify-between gap-3" data-row-id="${d.id}">
             <div class="flex-1 min-w-0 cursor-pointer open-detail-btn" data-id="${d.id}">
@@ -3019,7 +3023,7 @@ Règles :
                 <div class="text-[15px] font-semibold truncate">${esc(patientFullName(pInfo))}</div>
                 ${neverSent ? '<span class="text-[10px] uppercase tracking-wider font-bold" style="color: var(--color-copper-600)">À envoyer</span>' : (!isFirst ? '<span class="text-[10px] uppercase tracking-wider text-accent font-bold">Relance #2</span>' : '')}
               </div>
-              <div class="text-[13px] text-ink-500 truncate">${esc(d.soins)} ${d.montant ? '· ' + fmtMoney(d.montant) : ''}${dueLabel}</div>
+              <div class="text-[13px] text-ink-500 truncate">${esc(d.soins)} ${d.montant ? '· ' + fmtMoney(d.montant) : ''}${dueLabel}${groupLabel}</div>
             </div>
             <div class="flex gap-1.5">
               ${relanceBtnHtml}
@@ -3268,7 +3272,7 @@ Règles :
         }
         // Jamais envoyé → envoi INITIAL du devis (pas une relance d'un devis que le patient n'a jamais reçu).
         if (devis.status === 'En attente' && !devis.devisMailSentAt) openComposeDevisSmart(devis, pInfo);
-        else openComposeRelanceModal(devis, pInfo);
+        else openComposeRelanceSmart(devis, pInfo); // 1 seul mail si le patient a plusieurs devis dus
       });
     });
     document.querySelectorAll('.quick-action-btn').forEach(b => {
@@ -6173,7 +6177,32 @@ Bien cordialement,`;
     }
   }
 
-  async function openComposeRelanceModal(devis, pInfo) {
+  // Tous les devis DUS en relance pour ce patient (même logique que la carte « À relancer »),
+  // pour n'envoyer qu'UN SEUL mail au lieu d'un par devis.
+  async function gatherDevisForRelance(patientId) {
+    if (!patientId) return [];
+    const list = await db.devis.where('patient_id').equals(patientId).toArray();
+    const today = dayStart(Date.now());
+    const due = list.filter(d =>
+      (d.status === 'En attente' || d.status === 'Relancé') &&
+      d.devisMailSentAt &&                               // jamais envoyé = ce n'est pas une relance
+      d.date_relance_prevue && dayStart(d.date_relance_prevue) <= today
+    );
+    due.sort((a, b) => (a.id || 0) - (b.id || 0));
+    return due;
+  }
+
+  // Ouvre le bon pop-up de relance : groupé si le patient a plusieurs devis dus, sinon simple.
+  async function openComposeRelanceSmart(devis, pInfo) {
+    const pid = (pInfo && pInfo.id) || (devis && devis.patient_id);
+    let batch = [];
+    try { batch = await gatherDevisForRelance(pid); } catch (e) { batch = []; }
+    if (batch.length > 1) return openComposeRelanceModal(batch[0], pInfo, batch);
+    return openComposeRelanceModal(devis, pInfo);
+  }
+
+  // groupCtx (optionnel) = liste des devis couverts par CE mail : 1 mail, N devis marqués relancés.
+  async function openComposeRelanceModal(devis, pInfo, groupCtx) {
     // Compliance LCEN : bloquer si le patient a coché "Ne plus solliciter"
     if (pInfo && pInfo.noContact === true) {
       toastConfirm(`⚠ Le patient ${patientFullName(pInfo)} a demandé à ne plus être sollicité (STOP). Envoyer quand même ?`, {
@@ -6183,7 +6212,7 @@ Bien cordialement,`;
         onConfirm: () => {
           // Force l'ouverture en ignorant le flag noContact pour cet envoi unique
           const pInfoOverride = Object.assign({}, pInfo, { noContact: false });
-          openComposeRelanceModal(devis, pInfoOverride);
+          openComposeRelanceModal(devis, pInfoOverride, groupCtx);
         }
       });
       return;
@@ -6191,25 +6220,40 @@ Bien cordialement,`;
     // Choix du template selon le nombre de relances déjà envoyées pour ce devis
     const previousRelances = await db.relances.where('devis_id').equals(devis.id).count();
     const isSecondRelance = previousRelances >= 1;
-    const template = isSecondRelance
+    let template = isSecondRelance
       ? getSetting('relanceTemplate2', DEFAULT_RELANCE_TEMPLATE_2)
       : getSetting('relanceTemplate', DEFAULT_RELANCE_TEMPLATE_1);
+    // Relance GROUPÉE : le texte parle « du devis » au singulier → on met au pluriel, sinon le mail
+    // serait faux pour le patient (il en a reçu plusieurs). Sans effet si le template a été réécrit.
+    if (groupCtx && groupCtx.length > 1) {
+      template = template
+        // Tournures des templates par défaut (participe passé à accorder) — les plus spécifiques d'abord
+        .replace(/du devis que nous vous avons adressé le /gi, 'des devis que nous vous avons adressés le ')
+        .replace(/le devis que nous vous avons adressé le /gi, 'les devis que nous vous avons adressés le ')
+        .replace(/de votre devis du \{\{date_envoi\}\}/gi, 'de vos devis') // « du 12 mai et le 3 juin » se lirait mal
+        // Filet générique (templates réécrits par le Dr)
+        .replace(/votre devis/gi, 'vos devis')
+        .replace(/du devis/gi, 'de vos devis');
+    }
     const doctorName = (getSetting('doctorName', '') || '').trim() || 'Votre dentiste';
     const relUtm = isSecondRelance ? UTM_RELANCE2 : UTM_RELANCE;
     if (!devis.jeton) { devis.jeton = makeJeton(); try { await db.devis.update(devis.id, { jeton: devis.jeton }); } catch (e) {} }
     const mdKeys = await patientSoinsKeys(pInfo && pInfo.id, devis);
+    // Dates d'envoi couvertes par ce mail : « 12 mai » ou « 12 mai et le 3 juin » (lu après « adressés le »).
+    const _dates = [...new Set((groupCtx && groupCtx.length ? groupCtx : [devis]).map(d => formatDate(d.date_envoi)).filter(Boolean))];
+    const _relanceDateLabel = _dates.length > 1 ? _dates.slice(0, -1).join(', le ') + ' et le ' + _dates[_dates.length - 1] : (_dates[0] || '');
     const filled = template
       .replaceAll('{{salutation}}', buildSalutation(pInfo))
       .replaceAll('{{civilite}}', titreOf(pInfo))
       .replaceAll('{{titre}}', titreOf(pInfo))
       .replaceAll('{{prenom}}', pInfo.prenom || '')
       .replaceAll('{{nom}}', pInfo.nom || '')
-      .replaceAll('{{soins}}', devis.soins || '')
-      .replaceAll('{{date_envoi}}', formatDate(devis.date_envoi))
+      .replaceAll('{{soins}}', groupCtx ? groupCtx.map(d => d.soins).filter(Boolean).join(', ') : (devis.soins || ''))
+      .replaceAll('{{date_envoi}}', _relanceDateLabel)
       .replaceAll('{{lien_comprendre}}', buildMonDevisUrl(devis.jeton, pInfo, mdKeys, relUtm))
       .replaceAll('{{lien_rappel}}', buildRappelUrl(devis.jeton, relUtm, patientFullName(pInfo)))
       .replaceAll('{{doctor}}', doctorName);
-    const subjectDefault = `Suite à votre devis du ${formatDate(devis.date_envoi)}`;
+    const subjectDefault = (groupCtx && groupCtx.length > 1) ? 'Suite à vos devis' : `Suite à votre devis du ${_relanceDateLabel}`;
     const userEmail = getSetting('googleUserEmail', '');
 
     const html = `
@@ -6231,6 +6275,7 @@ Bien cordialement,`;
           <label class="text-[13px] font-medium text-ink-700 block mb-1.5 ml-1">Corps du mail</label>
           <textarea id="compose-body" rows="14" class="input !text-[14px]" style="font-family: inherit">${filled.replace(/</g, '&lt;')}</textarea>
         </div>
+        ${groupCtx ? `<div class="text-[12px] px-1" style="color: var(--color-copper-600)"><strong>Un seul mail pour les ${groupCtx.length} devis</strong> de ce patient — tous seront marqués « relancé ».</div>` : ''}
         <div class="text-[12px] text-ink-500 px-1">Envoi depuis ton Gmail (${userEmail || '?'}). Apparaît dans tes envoyés. Le devis n'est <strong>pas</strong> en pièce jointe (relance, pas mail initial).</div>
       </div>
     `;
@@ -6252,10 +6297,14 @@ Bien cordialement,`;
       try {
         const userEmailFresh = getSetting('googleUserEmail', '') || userEmail;
         await Gmail.sendEmail({ to, subject, body, from: doctorName && userEmailFresh ? `${doctorName} <${userEmailFresh}>` : '' });
-        await db.relances.add({ devis_id: devis.id, date: new Date().toISOString(), method: 'gmail' });
         const abandonDays = parseInt(getSetting('abandonDays', '24'), 10) || 24;
-        await db.devis.update(devis.id, { status: 'Relancé', date_relance_prevue: addDays(new Date(), abandonDays) });
-        toast('Mail envoyé via Gmail ✓', 'success');
+        const _nextRelance = addDays(new Date(), abandonDays);
+        const _covered = groupCtx && groupCtx.length ? groupCtx : [devis]; // 1 mail → tous les devis couverts sont relancés
+        for (const _d of _covered) {
+          await db.relances.add({ devis_id: _d.id, date: new Date().toISOString(), method: 'gmail' });
+          await db.devis.update(_d.id, { status: 'Relancé', date_relance_prevue: _nextRelance });
+        }
+        toast(_covered.length > 1 ? `Mail envoyé ✓ — ${_covered.length} devis relancés` : 'Mail envoyé via Gmail ✓', 'success');
         closeDetail();
         renderDashboard();
         if (document.getElementById('view-stats') && document.getElementById('view-stats').classList.contains('active')) renderStats();
@@ -6379,10 +6428,10 @@ Bien cordialement,`;
 
     await refreshPatientsCache();
     const all = await db.devis.toArray();
-    const now = Date.now();
+    const _todayStart = dayStart(Date.now()); // même règle « à la journée » que le tableau de bord
     const relancesDues = all.filter(d => {
       if (d.status !== 'En attente' && d.status !== 'Relancé') return false;
-      if (new Date(d.date_relance_prevue).getTime() > now) return false;
+      if (dayStart(d.date_relance_prevue) > _todayStart) return false;
       // Compliance LCEN : ne pas inclure les patients STOP dans le récap matinal
       const p = d.patient_id ? getCachedPatient(d.patient_id) : null;
       if (p && p.noContact === true) return false;
@@ -6452,8 +6501,9 @@ Bien cordialement,`;
   // v2.5.8 — Liste des devis acceptés depuis 30j+ sans soin marqué terminé.
   async function getSoinsToCheck(devisSnapshot) {
     const delay = Math.max(7, parseInt(getSetting('soinsCheckDelay', '30'), 10) || 30);
-    const now = Date.now();
-    const cutoff = now - delay * 24 * 60 * 60 * 1000;
+    // Comparaison À LA JOURNÉE (pas à l'heure) : le bandeau est complet dès la 1re ouverture du jour.
+    const today = dayStart(Date.now());
+    const cutoff = today - delay * 24 * 60 * 60 * 1000;
     // P1-A : snapshot fourni (renderDashboard) → filtre pur ; sinon lecture DB + cache (appelants standalone)
     let all = devisSnapshot;
     if (!all) { await refreshPatientsCache(); all = await db.devis.toArray(); }
@@ -6461,8 +6511,8 @@ Bien cordialement,`;
       if (d.status !== 'Accepté') return false;
       if (d.soinTermine) return false;
       if (!d.dateAcceptation) return false;
-      if (new Date(d.dateAcceptation).getTime() > cutoff) return false;
-      if (d.soinCheckIgnoreUntil && new Date(d.soinCheckIgnoreUntil).getTime() > now) return false;
+      if (dayStart(d.dateAcceptation) > cutoff) return false; // pas encore 30j (en jours calendaires)
+      if (d.soinCheckIgnoreUntil && dayStart(d.soinCheckIgnoreUntil) > today) return false; // "Pas encore" en cours
       const p = d.patient_id ? getCachedPatient(d.patient_id) : null;
       if (!p || !p.email) return false;
       if (p.noContact === true) return false;
@@ -7119,10 +7169,13 @@ Bien cordialement,`;
   }
 
   // v2.5.8 — Modale "Soins à vérifier"
-  async function openSoinsToCheckModal() {
+  async function openSoinsToCheckModal(opts = {}) {
     const soins = await getSoinsToCheck();
     if (soins.length === 0) {
-      toast('Aucun soin à vérifier pour le moment', 'info');
+      // Fix : quand le DERNIER soin vient d'être traité, on FERME la fenêtre (avant : elle restait
+      // ouverte avec la liste périmée) et on rafraîchit le dashboard (bandeau orange à jour).
+      if (opts.afterAction) { closeDetail(); renderDashboard(); toast('Tous les soins sont à jour ✓', 'success'); }
+      else toast('Aucun soin à vérifier pour le moment', 'info');
       return;
     }
     const rows = soins.map((d, idx) => {
@@ -7167,7 +7220,8 @@ Bien cordialement,`;
         await db.devis.update(devis.id, { soinTermine: true, dateSoinTermine: new Date().toISOString() });
         toast('Soin marqué terminé ✓ (mail avis dans 14j)', 'success');
         scheduleAutoBackup();
-        await openSoinsToCheckModal();
+        renderDashboard(); // bandeau « X soins à vérifier » remis à jour tout de suite
+        await openSoinsToCheckModal({ afterAction: true }); // refresh la liste (ferme si plus rien)
       });
     });
     document.querySelectorAll('.soin-pas-encore-btn').forEach(btn => {
@@ -7178,7 +7232,8 @@ Bien cordialement,`;
         const ignoreUntil = new Date(Date.now() + 15 * 24 * 60 * 60 * 1000).toISOString();
         await db.devis.update(devis.id, { soinCheckIgnoreUntil: ignoreUntil });
         toast('Repoussé de 15 jours', 'info');
-        await openSoinsToCheckModal();
+        renderDashboard();
+        await openSoinsToCheckModal({ afterAction: true }); // refresh (ferme si plus rien)
       });
     });
   }
