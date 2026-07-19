@@ -5943,6 +5943,8 @@ Bien cordialement,`;
     }
     // Anti double-envoi : on note l'état « envoyé » à l'ouverture ; avant d'envoyer on relira la base.
     const _openSentAt = devis.devisMailSentAt || null;
+    // Publication de la page patient : définie plus bas (bloc récit), appelée par l'envoi. Null = pas de récit.
+    let _publishRecitNow = null;
     const doctorName = (getSetting('doctorName', '') || '').trim() || 'Votre dentiste';
     const filled = getSetting('devisTemplate', DEFAULT_DEVIS_TEMPLATE)
       .replaceAll('{{salutation}}', buildSalutation(pInfo))
@@ -5959,41 +5961,50 @@ Bien cordialement,`;
       <div class="flex items-center justify-between mb-4">
         <button id="dcompose-cancel" class="text-[16px] text-ink-500 font-normal">Annuler</button>
         <div class="text-[17px] font-semibold">Envoyer le devis</div>
-        <button id="dcompose-send" class="text-[16px] text-accent font-semibold">Envoyer</button>
+        <div class="w-16"></div>
       </div>
-      <div class="space-y-3">
+      <div class="space-y-4">
+
+        <!-- 1. LE MAIL -->
         <div>
-          <label class="text-[13px] font-medium text-ink-700 block mb-1.5 ml-1">Destinataire</label>
-          <input id="dcompose-to" type="email" class="input" value="${(pInfo.email || '').replace(/"/g, '&quot;')}"/>
+          <div class="text-[11px] uppercase tracking-wider text-ink-400 font-bold mb-1.5 ml-1">1 · Le mail</div>
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            <input id="dcompose-to" type="email" class="input !text-[14px]" placeholder="Destinataire" value="${(pInfo.email || '').replace(/"/g, '&quot;')}"/>
+            <input id="dcompose-subject" type="text" class="input !text-[14px]" placeholder="Sujet" value="Votre devis — Dr Sohaïb Kebieche"/>
+          </div>
+          <!-- PDF : ligne compacte quand il est déjà là (avant : « Aucun fichier choisi » contredisait « ✓ attaché ») -->
+          <div class="mt-2 flex items-center gap-2 rounded-xl px-3 py-2" style="background:#F3F2EE">
+            <span id="dcompose-pdf-status" class="text-[12.5px] flex-1 min-w-0 truncate"></span>
+            <button id="dcompose-pdf-btn" type="button" class="text-[12.5px] text-accent font-semibold flex-shrink-0">Choisir…</button>
+            <input id="dcompose-pdf" type="file" accept="application/pdf" class="hidden"/>
+          </div>
         </div>
-        <div>
-          <label class="text-[13px] font-medium text-ink-700 block mb-1.5 ml-1">Sujet</label>
-          <input id="dcompose-subject" type="text" class="input" value="Votre devis — Dr Sohaïb Kebieche"/>
-        </div>
-        <div>
-          <label class="text-[13px] font-medium text-ink-700 block mb-1.5 ml-1">Devis officiel (PDF exporté de Logos)</label>
-          <input id="dcompose-pdf" type="file" accept="application/pdf" class="input !h-auto !py-2.5"/>
-          <p class="text-[11px] text-ink-400 mt-1 ml-1">PDF joint au mail. S'il a été importé, il est déjà attaché — sinon sélectionne-le ici.</p>
-          <p id="dcompose-pdf-status" class="text-[12px] mt-1 ml-1"></p>
-        </div>
+
+        <!-- 2. LA PAGE DU PATIENT -->
         <div class="rounded-xl p-3" style="border:1px solid #E6E3DC; background:#FAFAF8">
           <div class="flex items-center justify-between">
-            <span class="text-[13px] font-semibold text-ink-700">✨ Page premium du patient (récit lia)</span>
-            <button id="drecit-gen" type="button" class="text-[13px] text-accent font-semibold">Générer</button>
+            <span class="text-[11px] uppercase tracking-wider font-bold" style="color: var(--color-copper-600)">2 · La page du patient</span>
+            <button id="drecit-gen" type="button" class="btn btn-secondary btn-sm !text-[12.5px]">✨ Générer</button>
           </div>
-          <p id="drecit-status" class="text-[12px] text-ink-500 mt-1 hidden"></p>
-          <div id="drecit-fields" class="mt-2 hidden space-y-2.5"></div>
-          <div id="drecit-actions" class="flex items-center gap-4 mt-2 hidden">
-            <button id="drecit-publish" type="button" class="text-[13px] text-accent font-semibold">Publier + utiliser le lien</button>
-            <a id="drecit-preview" href="#" target="_blank" rel="noopener" class="text-[13px] text-ink-500 underline">Prévisualiser</a>
+          <p id="drecit-status" class="text-[12px] text-ink-500 mt-1.5 hidden"></p>
+          <p id="drecit-hint" class="text-[12px] text-ink-500 mt-1.5">Génère le récit personnalisé, relis-le : il sera publié automatiquement à l'envoi. Sans récit, le patient reçoit la version simple (fiches de soins).</p>
+          <div id="drecit-fields" class="mt-2.5 hidden space-y-2.5"></div>
+          <div id="drecit-actions" class="mt-2.5 hidden">
+            <button id="drecit-preview" type="button" class="text-[12.5px] text-accent font-semibold">👁 Voir la page telle que le patient la verra</button>
           </div>
-          <p class="text-[11px] text-ink-400 mt-1">Génère le récit, relis-le, publie : le lien du mail pointera vers la page premium. Sinon le lien reste la version simple (cartes).</p>
         </div>
+
+        <!-- 3. LE TEXTE ENVOYÉ -->
         <div>
-          <label class="text-[13px] font-medium text-ink-700 block mb-1.5 ml-1">Corps du mail</label>
-          <textarea id="dcompose-body" rows="11" class="input !text-[14px]" style="font-family: inherit">${filled.replace(/</g, '&lt;')}</textarea>
+          <div class="text-[11px] uppercase tracking-wider text-ink-400 font-bold mb-1.5 ml-1">3 · Le texte envoyé</div>
+          <textarea id="dcompose-body" rows="10" class="input !text-[14px]" style="font-family: inherit">${filled.replace(/</g, '&lt;')}</textarea>
         </div>
-        <div class="text-[12px] text-ink-500 px-1">Envoi premium depuis ton Gmail (${userEmail || '?'}) : écrin + lien page patient + PDF en pièce jointe.</div>
+
+        <!-- Envoi : bouton principal TOUJOURS visible (avant : « Envoyer » en haut, « Publier » en bas → oublis) -->
+        <div class="pt-1 pb-1" style="position:sticky; bottom:0; background:linear-gradient(to bottom, rgba(255,255,255,0), #fff 22%)">
+          <button id="dcompose-send" class="btn btn-primary w-full !py-3 !text-[15px]">Envoyer le devis à ${esc(pInfo.prenom || patientFullName(pInfo))}</button>
+          <p class="text-[11px] text-ink-400 mt-1.5 text-center">Depuis ton Gmail (${userEmail || '?'}) · PDF joint · page du patient publiée automatiquement</p>
+        </div>
       </div>
     `;
     document.getElementById('modal-detail-content').innerHTML = html;
@@ -6002,31 +6013,48 @@ Bien cordialement,`;
     document.getElementById('dcompose-cancel').addEventListener('click', closeDetail);
     // Indicateur PDF joint (vert = attaché, rouge = aucun)
     const pdfStatusEl = document.getElementById('dcompose-pdf-status');
+    const pdfBtnEl = document.getElementById('dcompose-pdf-btn');
     function refreshPdfStatus() {
       const f = document.getElementById('dcompose-pdf').files;
+      const ok = (txt) => { pdfStatusEl.textContent = '📎 ' + txt; pdfStatusEl.className = 'text-[12.5px] flex-1 min-w-0 truncate text-success'; pdfBtnEl.textContent = 'Remplacer'; };
+      const ko = () => { pdfStatusEl.textContent = '⚠ Aucun PDF — le mail partira sans le devis officiel'; pdfStatusEl.className = 'text-[12.5px] flex-1 min-w-0 truncate text-danger'; pdfBtnEl.textContent = 'Choisir…'; };
       if (groupCtx) {
         const _n = groupCtx.items.filter(it => it.pdf && it.pdf.base64).length + ((f && f[0]) ? 1 : 0);
-        if (_n === 0) { pdfStatusEl.textContent = '⚠ Aucun PDF — le mail partira SANS le devis officiel.'; pdfStatusEl.className = 'text-[12px] mt-1 ml-1 text-danger'; }
-        else { pdfStatusEl.textContent = '✓ ' + _n + ' devis PDF joint' + (_n > 1 ? 's' : ''); pdfStatusEl.className = 'text-[12px] mt-1 ml-1 text-success'; }
+        if (_n === 0) ko(); else ok(_n + ' devis PDF joint' + (_n > 1 ? 's' : ''));
         return;
       }
-      if (f && f[0]) { pdfStatusEl.textContent = '✓ PDF joint : ' + f[0].name; pdfStatusEl.className = 'text-[12px] mt-1 ml-1 text-success'; }
-      else if (ownPdf && ownPdf.base64) { pdfStatusEl.textContent = "✓ Devis PDF attaché (depuis l'import) : " + (ownPdf.name || 'devis.pdf'); pdfStatusEl.className = 'text-[12px] mt-1 ml-1 text-success'; }
-      else { pdfStatusEl.textContent = '⚠ Aucun PDF — le mail partira SANS le devis officiel.'; pdfStatusEl.className = 'text-[12px] mt-1 ml-1 text-danger'; }
+      if (f && f[0]) ok(f[0].name);
+      else if (ownPdf && ownPdf.base64) ok(ownPdf.name || 'devis.pdf');
+      else ko();
     }
     refreshPdfStatus();
     document.getElementById('dcompose-pdf').addEventListener('change', refreshPdfStatus);
+    pdfBtnEl.addEventListener('click', () => document.getElementById('dcompose-pdf').click());
     document.getElementById('dcompose-send').addEventListener('click', async () => {
       await withBusyGuard('send-devis', async () => {
       const to = document.getElementById('dcompose-to').value.trim();
       const subject = document.getElementById('dcompose-subject').value.trim();
-      const body = document.getElementById('dcompose-body').value;
+      let body = document.getElementById('dcompose-body').value; // « let » : relu après la publication auto du récit
       if (!to) { toast('Email destinataire manquant', 'warning'); return; }
       const fileInput = document.getElementById('dcompose-pdf');
       const file = fileInput.files && fileInput.files[0];
       const sendBtn = document.getElementById('dcompose-send');
       sendBtn.disabled = true; const orig = sendBtn.textContent; sendBtn.textContent = 'Envoi…';
       try {
+        // PUBLICATION AUTOMATIQUE de la page du patient (s'il y a un récit relu) — avant l'envoi,
+        // pour que le lien du mail pointe vers la vraie page. Supprime l'oubli du bouton « Publier ».
+        if (_publishRecitNow) {
+          sendBtn.textContent = 'Publication de la page…';
+          const _pub = await _publishRecitNow();
+          if (!_pub.ok && _pub.reason !== 'no-recit') {
+            const _go = await new Promise(res => toastConfirm(
+              'La page du patient n\'a pas pu être publiée (' + _pub.reason + '). Envoyer quand même ? Le patient recevra la version simple.',
+              { confirmLabel: 'Envoyer quand même', cancelLabel: 'Annuler', durationMs: 20000, onConfirm: () => res(true), onCancel: () => res(false) }));
+            if (!_go) { sendBtn.disabled = false; sendBtn.textContent = orig; return; }
+          }
+          sendBtn.textContent = 'Envoi…';
+          body = document.getElementById('dcompose-body').value; // relu APRÈS publication : le lien a changé
+        }
         let attachments = [];
         if (groupCtx) {
           attachments = groupCtx.items.filter(it => it.pdf && it.pdf.base64).map(it => ({ filename: it.pdf.name || 'devis.pdf', mimeType: 'application/pdf', dataB64: it.pdf.base64 }));
@@ -6132,23 +6160,29 @@ Bien cordialement,`;
           _recitDraft = recit;
           renderRecitFields(recit);
           actionsEl.classList.remove('hidden');
-          setStatus('✓ Récit généré — relis et corrige les textes, puis « Publier + utiliser le lien ».', 'text-success');
-          recitGenBtn.textContent = 'Régénérer';
+          const _hint = document.getElementById('drecit-hint'); if (_hint) _hint.classList.add('hidden'); // l'aide laisse la place au récit
+          setStatus('✓ Récit généré — relis et corrige. Il sera publié tout seul quand tu enverras.', 'text-success');
+          recitGenBtn.textContent = '↻ Régénérer';
         } catch (e) {
           setStatus('Erreur : ' + e.message, 'text-danger');
           toast('Génération échouée : ' + e.message, 'error');
           recitGenBtn.textContent = o;
         } finally { recitGenBtn.disabled = false; }
       }));
-      document.getElementById('drecit-publish').addEventListener('click', () => withBusyGuard('recit-publish', async () => {
-        if (!_recitDraft) { toast('Génère d\'abord le récit (bouton « Générer »).', 'warning'); return; }
-        const recit = collectRecitFields(); // recompose le récit depuis les champs texte — plus jamais de JSON à relire
+      // Publie le récit relu + bascule le lien du mail vers la page premium.
+      // Appelée par « Voir la page » ET automatiquement à l'ENVOI → plus d'oubli de publication possible.
+      // Renvoie { ok, kvUrl } ou { ok:false, reason } (jamais d'exception : l'appelant décide).
+      _publishRecitNow = async function () {
+        if (!_recitDraft) return { ok: false, reason: 'no-recit' }; // pas de récit → lien « version simple », normal
+        const recit = collectRecitFields(); // recompose depuis les champs texte — plus jamais de JSON à relire
         recit.jeton = devis.jeton;
         recit.salutation = recit.salutation || buildSalutation(pInfo);
         recit.nom = recit.nom || patientFullName(pInfo);
         const _bad = recitBannedHit(recit);
-        if (_bad) { setStatus('⚠ Publication bloquée — terme à risque dans le récit : « ' + _bad + ' ». Corrige le texte puis republie.', 'text-danger'); toast('Récit bloqué : « ' + _bad + ' »', 'error'); return; }
-        const pubBtn = document.getElementById('drecit-publish'); pubBtn.disabled = true; const o = pubBtn.textContent; pubBtn.textContent = 'Publication…';
+        if (_bad) {
+          setStatus('⚠ Publication bloquée — terme à risque dans le récit : « ' + _bad + ' ». Corrige le texte.', 'text-danger');
+          return { ok: false, reason: 'terme à risque : « ' + _bad + ' »', banned: true };
+        }
         try {
           await publishRecitToKv(devis.jeton, recit);
           try { await db.devis.update(devis.id, { recitPublishedAt: new Date().toISOString() }); } catch (e) {}
@@ -6163,17 +6197,23 @@ Bien cordialement,`;
               bodyEl.value = bodyEl.value.replace(/https?:\/\/[^\s)>\]]*\/(?:mon-devis|comprendre-mon-devis)[^\s)>\]]*/g, kvUrl);
             }
           }
-          const prev = document.getElementById('drecit-preview'); prev.href = kvUrl;
-          // On ne rassure QUE si le lien premium est réellement dans le corps du mail.
-          if (bodyEl && bodyEl.value.indexOf(kvUrl) !== -1) {
-            setStatus('✓ Page publiée — le lien du mail pointe vers le récit. Prévisualise puis envoie.', 'text-success');
-          } else {
-            setStatus('✓ Page publiée, mais le lien n\'a pas pu être inséré tout seul. Colle ce lien dans le mail : ' + kvUrl, 'text-danger');
-          }
-          toast('Page premium publiée ✓', 'success');
+          const linked = !!(bodyEl && bodyEl.value.indexOf(kvUrl) !== -1);
+          setStatus(linked ? '✓ Page du patient prête (publiée).' : '✓ Page publiée, mais le lien n\'a pas pu être inséré. Colle-le dans le mail : ' + kvUrl, linked ? 'text-success' : 'text-danger');
+          return { ok: true, kvUrl, linked };
         } catch (e) {
-          toast('Publication : ' + e.message, 'error');
-        } finally { pubBtn.disabled = false; pubBtn.textContent = o; }
+          setStatus('⚠ Publication impossible : ' + e.message, 'text-danger');
+          return { ok: false, reason: e.message };
+        }
+      };
+      // « Voir la page telle que le patient la verra » : publie (sinon rien à montrer) puis ouvre l'onglet.
+      document.getElementById('drecit-preview').addEventListener('click', () => withBusyGuard('recit-preview', async () => {
+        const prevBtn = document.getElementById('drecit-preview');
+        prevBtn.disabled = true; const o = prevBtn.textContent; prevBtn.textContent = 'Préparation…';
+        try {
+          const r = await _publishRecitNow();
+          if (r.ok) window.open(r.kvUrl, '_blank', 'noopener');
+          else toast('Aperçu impossible — ' + (r.reason || 'récit manquant'), r.banned ? 'error' : 'warning');
+        } finally { prevBtn.disabled = false; prevBtn.textContent = o; }
       }));
     }
   }
