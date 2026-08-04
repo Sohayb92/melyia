@@ -3102,9 +3102,30 @@ Règles :
               <div class="text-[15px] font-semibold truncate">${esc(patientFullName(it.patient))}</div>
               <div class="text-[13px] text-ink-500 truncate">${esc(it.label)}</div>
             </div>
-            <button class="send-avis-btn btn btn-primary btn-sm !px-3" data-pid="${it.patient.id}" data-did="${it.devisId || ''}" title="Envoyer le mail d'avis">${_mailSvg}</button>
+            <div class="flex gap-1.5">
+              <button class="send-avis-btn btn btn-primary btn-sm !px-3" data-pid="${it.patient.id}" data-did="${it.devisId || ''}" title="Envoyer le mail d'avis">${_mailSvg}</button>
+              <button class="skip-avis-btn btn btn-secondary btn-sm !px-3" data-pid="${it.patient.id}" data-name="${esc(patientFullName(it.patient))}" title="Ne pas envoyer d'avis à ce patient"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+            </div>
           </div>`).join('');
       document.querySelectorAll('.open-patient-from-avis').forEach(b => b.addEventListener('click', () => openPatientDetail(parseInt(b.dataset.pid))));
+      // « Ne pas envoyer » : sort de la liste définitivement, avec Annuler pendant quelques secondes.
+      document.querySelectorAll('.skip-avis-btn').forEach(b => b.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        b.disabled = true;
+        const pid = parseInt(b.dataset.pid, 10);
+        try {
+          const undo = await skipReviewQueueItem(pid);
+          await refreshPatientsCache();
+          renderDashboard();
+          scheduleAutoBackup();
+          toastUndo('Avis annulé pour ' + b.dataset.name + ' — aucun mail ne partira', async () => {
+            await undoSkipReviewQueueItem(undo);
+            renderDashboard();
+            scheduleAutoBackup();
+            toast('Avis rétabli', 'info');
+          });
+        } catch (err) { toast('Erreur : ' + err.message, 'error'); b.disabled = false; }
+      }));
       document.querySelectorAll('.send-avis-btn').forEach(b => b.addEventListener('click', async (e) => {
         e.stopPropagation();
         b.disabled = true;
@@ -4296,6 +4317,8 @@ Règles :
       const devisWithReview = devisList.find(d => d.googleReviewMailSent && d.googleReviewMailSentAt);
       if (devisWithReview) reviewSent = { at: devisWithReview.googleReviewMailSentAt, source: 'auto' };
     }
+    // « Ne pas envoyer » assumé par le praticien : on l'affiche, sinon la fiche resterait muette sur le POURQUOI
+    const reviewSkippedAt = (!reviewSent && patient.avisSkippedAt) ? patient.avisSkippedAt : null;
 
     const html = `
       <div class="flex items-center justify-between mb-4">
@@ -4346,6 +4369,12 @@ Règles :
               </div>
             </div>
           ` : `
+            ${reviewSkippedAt ? `
+              <div class="grouped-row block">
+                <div class="text-[14px] text-ink-700"><span class="font-medium">Avis non sollicité</span> <span class="text-ink-400">(ton choix, le ${formatDate(reviewSkippedAt)})</span></div>
+                <div class="text-[12px] text-ink-500 mt-0.5">Aucune demande d'avis ne partira automatiquement. Tu peux quand même en envoyer une ci-dessous.</div>
+              </div>
+            ` : ''}
             <div class="grouped-row block">
               <button id="send-google-review-manual" class="btn btn-secondary w-full !text-[14px]">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
@@ -6577,7 +6606,7 @@ Bien cordialement,`;
     for (const p of pats) {
       if (seen.has(p.id)) continue;
       if (!p.reviewScheduledAt || dayStart(p.reviewScheduledAt) > dayStart(now)) continue; // dû dès le début du jour programmé
-      if (!p.email || p.noContact === true || p.googleReviewSentManuallyAt) continue;
+      if (!p.email || p.noContact === true || p.googleReviewSentManuallyAt || p.avisSkippedAt) continue;
       seen.add(p.id);
       items.push({ patient: p, devisId: null, label: 'avis programmé' });
     }
@@ -6594,6 +6623,32 @@ Bien cordialement,`;
     if (p.reviewScheduledAt) { try { await db.patients.update(patientId, { reviewScheduledAt: null }); } catch (e) {} }
   }
 
+  // « Ne pas envoyer cet avis » : le praticien se réserve le droit de NE PAS solliciter un patient
+  // (cas exceptionnel). Rien n'est envoyé, rien n'est compté dans les stats (pas de googleReviewMailSentAt).
+  // Définitif : le patient ne revient plus dans la file — il reste possible d'envoyer à la main depuis sa fiche.
+  // Renvoie de quoi ANNULER (toastUndo) : l'état d'avant.
+  async function skipReviewQueueItem(patientId) {
+    const now = new Date().toISOString();
+    const p = await db.patients.get(patientId);
+    let devisIds = [];
+    try {
+      const list = await db.devis.where('patient_id').equals(patientId).toArray();
+      devisIds = list.filter(d => d.soinTermine && !d.googleReviewMailSent && !d.googleReviewSkipped).map(d => d.id);
+    } catch (e) {}
+    for (const id of devisIds) { try { await db.devis.update(id, { googleReviewSkipped: true, googleReviewSkippedAt: now }); } catch (e) {} }
+    const hadScheduled = !!(p && p.reviewScheduledAt);
+    try { await db.patients.update(patientId, { avisSkippedAt: now, reviewScheduledAt: null }); } catch (e) {}
+    return { patientId, devisIds, prevScheduledAt: hadScheduled ? p.reviewScheduledAt : null, prevSkippedAt: (p && p.avisSkippedAt) || null };
+  }
+
+  // Rétablit un avis annulé par erreur (bouton « Annuler » du toast).
+  async function undoSkipReviewQueueItem(u) {
+    if (!u) return;
+    for (const id of u.devisIds) { try { await db.devis.update(id, { googleReviewSkipped: false, googleReviewSkippedAt: null }); } catch (e) {} }
+    try { await db.patients.update(u.patientId, { avisSkippedAt: u.prevSkippedAt, reviewScheduledAt: u.prevScheduledAt }); } catch (e) {}
+    await refreshPatientsCache();
+  }
+
   async function getGoogleReviewCandidates(devisSnapshot) {
     const delay = Math.max(1, parseInt(getSetting('googleReviewDelay', '14'), 10) || 14);
     // Comparaison À LA JOURNÉE (pas à l'heure) : tous les avis dont le soin a été terminé le même
@@ -6605,11 +6660,13 @@ Bien cordialement,`;
     return all.filter(d => {
       if (!d.soinTermine || !d.dateSoinTermine) return false;
       if (d.googleReviewMailSent) return false;
+      if (d.googleReviewSkipped) return false; // le praticien a choisi de ne pas solliciter ce patient
       if (dayStart(d.dateSoinTermine) > cutoff) return false; // pas encore J+N (en jours calendaires)
       const p = d.patient_id ? getCachedPatient(d.patient_id) : null;
       if (!p || !p.email) return false;
       if (p.noContact === true) return false;
       if (p.googleReviewSentManuallyAt) return false; // v2.5.11 — pas de double envoi manuel/auto
+      if (p.avisSkippedAt) return false;              // « ne pas envoyer » assumé par le praticien
       return true;
     });
   }
@@ -6632,7 +6689,7 @@ Bien cordialement,`;
       },
       onCancel: async (src) => {
         if (src !== 'button') return; // l'auto-fermeture ne programme rien
-        try { await db.patients.update(patient.id, { reviewScheduledAt: addDays(new Date(), delay) }); await refreshPatientsCache(); toast('Demande d\'avis programmée dans ' + delay + ' jours', 'success'); renderDashboard(); }
+        try { await db.patients.update(patient.id, { reviewScheduledAt: addDays(new Date(), delay), avisSkippedAt: null }); await refreshPatientsCache(); toast('Demande d\'avis programmée dans ' + delay + ' jours', 'success'); renderDashboard(); } // reprogrammer lève le « ne pas envoyer »
         catch (e) { toast('Erreur : ' + e.message, 'error'); }
       }
     });
@@ -6671,7 +6728,7 @@ Bien cordialement,`;
     const subject = `Votre passage au cabinet — un petit retour ?`;
     await Gmail.sendEmail({ to: patient.email, subject, body: filled, from: fromHeader });
 
-    await db.patients.update(patient.id, { googleReviewSentManuallyAt: new Date().toISOString() });
+    await db.patients.update(patient.id, { googleReviewSentManuallyAt: new Date().toISOString(), avisSkippedAt: null }); // envoi manuel = le « ne pas envoyer » n'a plus lieu d'être
     await refreshPatientsCache();
   }
 
