@@ -582,17 +582,17 @@
             <div class="text-[13px] text-ink-500 mt-0.5">Après l'envoi du devis</div>
           </div>
           <div class="flex items-center gap-2">
-            <input id="setting-relance-days" type="number" min="1" max="60" value="21" class="input !h-9 !w-20 !text-center !text-[15px]"/>
+            <input id="setting-relance-days" type="number" min="1" max="60" value="14" class="input !h-9 !w-20 !text-center !text-[15px]"/>
             <span class="text-[14px] text-ink-500">jours</span>
           </div>
         </div>
         <div class="grouped-row">
           <div class="flex-1">
             <div class="text-[15px] font-medium">Délai entre relances</div>
-            <div class="text-[13px] text-ink-500 mt-0.5">Entre ta 1ère et 2ème relance (puis suggestion "Sans réponse" automatique au-delà)</div>
+            <div class="text-[13px] text-ink-500 mt-0.5">Entre ta 1ère et 2ème relance. 2 relances maximum : ensuite, le devis se classe en « Sans réponse »</div>
           </div>
           <div class="flex items-center gap-2">
-            <input id="setting-abandon-days" type="number" min="1" max="60" value="24" class="input !h-9 !w-20 !text-center !text-[15px]"/>
+            <input id="setting-abandon-days" type="number" min="1" max="60" value="31" class="input !h-9 !w-20 !text-center !text-[15px]"/>
             <span class="text-[14px] text-ink-500">jours</span>
           </div>
         </div>
@@ -669,7 +669,7 @@
         </div>
         <div class="grouped-row block">
           <div class="flex items-center justify-between mb-1">
-            <div class="text-[15px] font-medium">Template — 1ère relance (J+21)</div>
+            <div class="text-[15px] font-medium">Template — 1ère relance (J+14)</div>
             <button type="button" data-reset-template="relanceTemplate" class="text-[12px] text-accent hover:underline">Réinitialiser</button>
           </div>
           <div class="text-[13px] text-ink-500 mb-2">Ton bienveillant, vérifie réception. Variables : <code>{{salutation}}</code> (= « Cher M. Dupont » / « Chère Mme Dupont » / « Bonjour Jean » selon civilité connue) · <code>{{civilite}}</code> (M./Mme) · <code>{{prenom}}</code> · <code>{{nom}}</code> · <code>{{soins}}</code> · <code>{{date_envoi}}</code> · <code>{{doctor}}</code><br>💡 Mets une ligne avec juste <code>---</code> (3 tirets) avant ta signature/diplômes pour qu'ils soient centrés et séparés par un trait fin dans le mail.</div>
@@ -677,7 +677,7 @@
         </div>
         <div class="grouped-row block">
           <div class="flex items-center justify-between mb-1">
-            <div class="text-[15px] font-medium">Template — 2ème relance (J+45, soit ~24j après la 1ère)</div>
+            <div class="text-[15px] font-medium">Template — 2ème et dernière relance (J+45, soit ~31j après la 1ère)</div>
             <button type="button" data-reset-template="relanceTemplate2" class="text-[12px] text-accent hover:underline">Réinitialiser</button>
           </div>
           <div class="text-[13px] text-ink-500 mb-2">Dernière prise de contact, ton plus net mais respectueux. Mêmes variables + séparateur signature <code>---</code>.</div>
@@ -1377,6 +1377,10 @@
   function setSetting(key, value) {
     localStorage.setItem('melyia_' + key, value);
   }
+
+  // Règle du cabinet : 2 relances MAXIMUM par devis (≈ J+14 puis ≈ J+45). Après la 2e : jamais de 3e mail,
+  // le devis se classe en « Sans réponse » (ou « Accepté » si le patient a pris RDV).
+  const MAX_RELANCES = 2;
 
   // Poste émetteur : seul ce poste déclenche les envois/rappels auto (évite les doublons multi-ordi).
   function isSenderDevice() { return getSetting('senderDevice', '0') === '1'; }
@@ -2592,7 +2596,7 @@ Règles :
     }
     const id = document.getElementById('form-id').value;
     const dateEnvoi = new Date(document.getElementById('form-date').value).toISOString();
-    const relanceDays = parseInt(getSetting('relanceDays', '21'), 10) || 21;
+    const relanceDays = parseInt(getSetting('relanceDays', '14'), 10) || 14;
     const data = {
       patient_id: selectedPatientForDevis.id,
       soins: document.getElementById('form-soins').value.trim(),
@@ -2675,10 +2679,11 @@ Règles :
     const fullName = patientFullName(pInfo);
 
     const isRelanceDue = (devis.status === 'En attente' || devis.status === 'Relancé') && new Date(devis.date_relance_prevue).getTime() <= Date.now();
-    const displayStatus = isRelanceDue ? 'Relance due' : devis.status;
     const isClosed = ['Accepté', 'Refusé', 'Sans réponse'].includes(devis.status);
+    const displayStatus = isRelanceDue && relances.length < MAX_RELANCES ? 'Relance due' : devis.status;
     const hasBeenSent = !!devis.devisMailSentAt || relances.length > 0 || devis.status === 'Relancé';
     const canMail = !!(pInfo.email && GoogleAuth.isConnected());
+    const maxRelancesReached = !isClosed && relances.length >= MAX_RELANCES; // règle : 2 relances max
 
     const html = `
       <div class="flex items-center justify-between mb-4">
@@ -2749,7 +2754,10 @@ Règles :
       <div class="text-[12px] uppercase tracking-wider text-ink-500 font-semibold ml-1 mb-1.5">Actions</div>
       <div class="space-y-2 mb-2">
         ${!isClosed ? `
-          ${canMail
+          ${maxRelancesReached
+            ? `<div class="text-[13px] text-ink-500 text-center py-1">2 relances déjà envoyées : pas de 3e relance.</div>
+               <button class="action-btn btn btn-primary w-full" data-action="noresponse">Classer « Sans réponse »</button>`
+            : canMail
             ? (hasBeenSent
                 ? `<button class="action-btn btn btn-primary w-full" data-action="send-mail-relance">Envoyer la relance par mail</button>`
                 : `<button class="action-btn btn btn-primary w-full" data-action="envoyer-devis">Envoyer le devis au patient</button>`)
@@ -2769,7 +2777,7 @@ Règles :
             <div class="text-[11px] uppercase tracking-wider text-ink-400 font-semibold mt-4 mb-1.5 ml-1">Statut</div>
             <div class="space-y-2">
               ${devis.status === 'En attente' ? `<button class="action-btn btn btn-secondary w-full" data-action="relancer">Marquer relancé (sans mail)</button>` : ''}
-              ${(devis.status === 'En attente' || devis.status === 'Relancé') ? `<button class="action-btn btn btn-secondary w-full" data-action="noresponse">Sans réponse</button>` : ''}
+              ${(devis.status === 'En attente' || devis.status === 'Relancé') && !maxRelancesReached ? `<button class="action-btn btn btn-secondary w-full" data-action="noresponse">Sans réponse</button>` : ''}
             </div>
             <div class="text-[11px] uppercase tracking-wider text-danger/60 font-semibold mt-4 mb-1.5 ml-1">Zone sensible</div>
             <div class="space-y-2">
@@ -2859,11 +2867,11 @@ Règles :
         await withBusyGuard('detail-action-' + id, async () => {
           if (action === 'relancer') {
             await db.relances.add({ devis_id: id, date: new Date().toISOString() });
-            const abandonDays = parseInt(getSetting('abandonDays', '24'), 10) || 24;
+            const abandonDays = parseInt(getSetting('abandonDays', '31'), 10) || 31;
             await db.devis.update(id, { status: 'Relancé', date_relance_prevue: addDays(new Date(), abandonDays) });
             toast('Relance enregistrée', 'success');
           } else if (action === 'reopen') {
-            const relanceDays = parseInt(getSetting('relanceDays', '21'), 10) || 21;
+            const relanceDays = parseInt(getSetting('relanceDays', '14'), 10) || 14;
             // Reopen efface dateAcceptation/Refus/SansReponse pour ne pas polluer les stats events-based
             await db.devis.update(id, { status: 'En attente', date_relance_prevue: addDays(new Date(), relanceDays), dateAcceptation: null, dateRefus: null, dateSansReponse: null });
             toast('Remis en attente', 'success');
@@ -2929,6 +2937,9 @@ Règles :
     const all = await db.devis.toArray();
     const allMaintenances = await db.maintenances.toArray();
     const allPatients = Array.from(patientsCache.values());
+    // Nb de relances déjà envoyées par devis → règle des 2 relances max (pas de 3e mail proposé)
+    const _relanceCount = new Map();
+    (await db.relances.toArray()).forEach(r => _relanceCount.set(r.devis_id, (_relanceCount.get(r.devis_id) || 0) + 1));
 
     // Stats
     const total = all.length;
@@ -3002,7 +3013,8 @@ Règles :
         const neverSent = isFirst && !d.devisMailSentAt; // jamais envoyé au patient → action = ENVOYER (pas relancer)
         const pInfo = devisPatientDisplay(d);
         // Bouton mail Mélyia si Google connecté + email patient présent ; sinon fallback "Marquer relancé"
-        const canMailFromMelyia = isFirst && googleReady && !!(pInfo && pInfo.email);
+        const _maxRelances = !isFirst && (_relanceCount.get(d.id) || 0) >= MAX_RELANCES; // 2 relances déjà envoyées
+        const canMailFromMelyia = !_maxRelances && googleReady && !!(pInfo && pInfo.email);
         const mailIconSvg = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>';
         const dashIconSvg = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"/></svg>';
         const relanceBtnHtml = canMailFromMelyia
@@ -3012,7 +3024,7 @@ Règles :
               : `<button class="quick-relance-btn btn btn-secondary btn-sm !px-3" data-id="${d.id}" data-first="false" title="Sans réponse">${dashIconSvg}</button>`);
         // Audit ergonomie : retard visible (« dû depuis X j », comme la carte maintenance)
         const _lateDays = Math.floor((_today - dayStart(d.date_relance_prevue)) / 86400000);
-        const dueLabel = _isNeverSentImported(d) ? '' : (_lateDays > 0 ? ` · <span class="text-danger font-medium">dû depuis ${_lateDays} j</span>` : ' · dû aujourd\'hui');
+        const dueLabel = _isNeverSentImported(d) ? '' : _maxRelances ? ' · <span class="font-medium">pas de 3e relance : à classer « Sans réponse »</span>' : (_lateDays > 0 ? ` · <span class="text-danger font-medium">dû depuis ${_lateDays} j</span>` : ' · dû aujourd\'hui');
         // Plusieurs devis dus pour ce patient → 1 SEUL mail les couvrira tous (openComposeRelanceSmart)
         const _sameP = d.patient_id ? relancesDues.filter(x => x.patient_id === d.patient_id && !_isNeverSentImported(x)).length : 1;
         const groupLabel = (!_isNeverSentImported(d) && _sameP > 1) ? ` · <span class="text-accent font-medium">${_sameP} devis → 1 mail</span>` : '';
@@ -3021,7 +3033,7 @@ Règles :
             <div class="flex-1 min-w-0 cursor-pointer open-detail-btn" data-id="${d.id}">
               <div class="flex items-center gap-2">
                 <div class="text-[15px] font-semibold truncate">${esc(patientFullName(pInfo))}</div>
-                ${neverSent ? '<span class="text-[10px] uppercase tracking-wider font-bold" style="color: var(--color-copper-600)">À envoyer</span>' : (!isFirst ? '<span class="text-[10px] uppercase tracking-wider text-accent font-bold">Relance #2</span>' : '')}
+                ${neverSent ? '<span class="text-[10px] uppercase tracking-wider font-bold" style="color: var(--color-copper-600)">À envoyer</span>' : (_maxRelances ? '<span class="text-[10px] uppercase tracking-wider text-ink-500 font-bold whitespace-nowrap" title="2 relances déjà envoyées : pas de 3e relance">2 relances</span>' : (!isFirst ? '<span class="text-[10px] uppercase tracking-wider text-accent font-bold whitespace-nowrap">Relance #2</span>' : ''))}
               </div>
               <div class="text-[13px] text-ink-500 truncate">${esc(d.soins)} ${d.montant ? '· ' + fmtMoney(d.montant) : ''}${dueLabel}${groupLabel}</div>
             </div>
@@ -3203,10 +3215,10 @@ Règles :
       }
     } else {
       listEl.innerHTML = filtered.map(d => {
-        const isRelanceDue = (d.status === 'En attente' || d.status === 'Relancé') && new Date(d.date_relance_prevue).getTime() <= now;
+        const isRelanceDue = (d.status === 'En attente' || d.status === 'Relancé') && new Date(d.date_relance_prevue).getTime() <= now && (_relanceCount.get(d.id) || 0) < MAX_RELANCES;
         const displayStatus = isRelanceDue ? 'Relance due' : d.status;
         const pInfo = devisPatientDisplay(d);
-        const _hov = rowHoverActions(d, pInfo, _googleReady);
+        const _hov = rowHoverActions(d, pInfo, _googleReady, _relanceCount.get(d.id) || 0);
         return `
           <div class="list-row open-detail-btn relative${_hov ? ' has-actions' : ''}" data-id="${d.id}">
             <div class="flex items-center justify-between gap-3">
@@ -3261,7 +3273,7 @@ Règles :
           // "Marquer relancé" (log relance + reprogrammation) — INCHANGÉ : P1-B n'y touche pas
           withBusyGuard('quick-relance-' + id, async () => {
             await db.relances.add({ devis_id: id, date: new Date().toISOString() });
-            const abandonDays = parseInt(getSetting('abandonDays', '24'), 10) || 24;
+            const abandonDays = parseInt(getSetting('abandonDays', '31'), 10) || 31;
             await db.devis.update(id, { status: 'Relancé', date_relance_prevue: addDays(new Date(), abandonDays) });
             toast('Relance enregistrée', 'success');
             renderDashboard();
@@ -3373,12 +3385,12 @@ Règles :
   }
 
   // P2-B — boutons d'action au survol d'une ligne de devis (selon le statut). Réutilise les classes/handlers existants (mail-relance-btn, quick-action-btn) + quick-soin-btn.
-  function rowHoverActions(d, pInfo, googleReady) {
+  function rowHoverActions(d, pInfo, googleReady, relanceCount) {
     const id = d.id;
     const mailSvg = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>';
     const checkSvg = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>';
     if (d.status === 'En attente' || d.status === 'Relancé') {
-      const canMail = googleReady && !!(pInfo && pInfo.email);
+      const canMail = googleReady && !!(pInfo && pInfo.email) && (relanceCount || 0) < MAX_RELANCES; // pas de 3e relance
       const neverSent = d.status === 'En attente' && !d.devisMailSentAt;
       const relance = canMail ? `<button class="mail-relance-btn btn btn-secondary btn-sm !px-2.5" data-id="${id}" title="${neverSent ? 'Envoyer le devis' : 'Relancer par mail'}">${mailSvg}</button>` : '';
       return `${relance}<button class="quick-action-btn btn btn-success btn-sm !px-2.5" data-id="${id}" data-action="accepted" title="Marquer accepté">${checkSvg}</button>`;
@@ -4845,9 +4857,18 @@ Bien cordialement,`;
     if (n) console.log('[Melyia] ' + n + ' template(s) migre(s) v2.6.0 (signature/voix)');
   })();
 
+  // v2.6.44 — Délais de relance voulus par le Dr : 1re relance à 2 semaines (J+14), 2e vers 1 mois et demi
+  // (J+45 = 14 + 31). Ne remplace QUE les anciens défauts (21 / 24) ; un réglage personnalisé est conservé.
+  (function migrateRelanceDelaysV2644(){
+    if (localStorage.getItem('melyia_relanceDelaysV2644') === '1') return;
+    if (localStorage.getItem('melyia_relanceDays') === '21') localStorage.setItem('melyia_relanceDays', '14');
+    if (localStorage.getItem('melyia_abandonDays') === '24') localStorage.setItem('melyia_abandonDays', '31');
+    localStorage.setItem('melyia_relanceDelaysV2644', '1');
+  })();
+
   function renderSettings() {
-    document.getElementById('setting-relance-days').value = getSetting('relanceDays', '21');
-    document.getElementById('setting-abandon-days').value = getSetting('abandonDays', '24');
+    document.getElementById('setting-relance-days').value = getSetting('relanceDays', '14');
+    document.getElementById('setting-abandon-days').value = getSetting('abandonDays', '31');
     document.getElementById('setting-doctor-name').value = getSetting('doctorName', '');
     document.getElementById('setting-cabinet-email').value = getSetting('cabinetEmail', '');
     document.getElementById('setting-api-key').value = getSetting('apiKey', '');
@@ -4895,8 +4916,8 @@ Bien cordialement,`;
   }
 
   function saveSettingsFromForm() {
-    setSetting('relanceDays', document.getElementById('setting-relance-days').value || '21');
-    setSetting('abandonDays', document.getElementById('setting-abandon-days').value || '24');
+    setSetting('relanceDays', document.getElementById('setting-relance-days').value || '14');
+    setSetting('abandonDays', document.getElementById('setting-abandon-days').value || '31');
     setSetting('doctorName', document.getElementById('setting-doctor-name').value.trim());
     setSetting('cabinetEmail', document.getElementById('setting-cabinet-email').value.trim());
     setSetting('apiKey', document.getElementById('setting-api-key').value.trim());
@@ -6258,7 +6279,9 @@ Bien cordialement,`;
       d.date_relance_prevue && dayStart(d.date_relance_prevue) <= today
     );
     due.sort((a, b) => (a.id || 0) - (b.id || 0));
-    return due;
+    // Règle des 2 relances max : un devis déjà relancé 2 fois n'entre pas dans un mail groupé
+    const _counts = await Promise.all(due.map(d => db.relances.where('devis_id').equals(d.id).count()));
+    return due.filter((d, i) => _counts[i] < MAX_RELANCES);
   }
 
   // Ouvre le bon pop-up de relance : groupé si le patient a plusieurs devis dus, sinon simple.
@@ -6288,6 +6311,10 @@ Bien cordialement,`;
     }
     // Choix du template selon le nombre de relances déjà envoyées pour ce devis
     const previousRelances = await db.relances.where('devis_id').equals(devis.id).count();
+    if (previousRelances >= MAX_RELANCES) { // garde-fou : jamais de 3e relance
+      toast('2 relances déjà envoyées pour ce devis : pas de 3e relance. Classez-le « Sans réponse » depuis sa fiche.', 'warning');
+      return;
+    }
     const isSecondRelance = previousRelances >= 1;
     let template = isSecondRelance
       ? getSetting('relanceTemplate2', DEFAULT_RELANCE_TEMPLATE_2)
@@ -6366,7 +6393,7 @@ Bien cordialement,`;
       try {
         const userEmailFresh = getSetting('googleUserEmail', '') || userEmail;
         await Gmail.sendEmail({ to, subject, body, from: doctorName && userEmailFresh ? `${doctorName} <${userEmailFresh}>` : '' });
-        const abandonDays = parseInt(getSetting('abandonDays', '24'), 10) || 24;
+        const abandonDays = parseInt(getSetting('abandonDays', '31'), 10) || 31;
         const _nextRelance = addDays(new Date(), abandonDays);
         const _covered = groupCtx && groupCtx.length ? groupCtx : [devis]; // 1 mail → tous les devis couverts sont relancés
         for (const _d of _covered) {
@@ -7223,7 +7250,7 @@ Bien cordialement,`;
             <input type="checkbox" class="stale-cb mt-1 w-4 h-4 accent-accent flex-shrink-0" data-idx="${idx}" checked>
             <div class="flex-1 min-w-0">
               <div class="text-[14px] font-medium truncate">${esc(patientFullName(p))}</div>
-              <div class="text-[12px] text-ink-500 mt-0.5">${esc(d.soins || '')} ${d.montant ? '· ' + fmtMoney(d.montant) : ''} · relancé il y a ${daysOld + 24}j</div>
+              <div class="text-[12px] text-ink-500 mt-0.5">${esc(d.soins || '')} ${d.montant ? '· ' + fmtMoney(d.montant) : ''} · relancé il y a ${daysOld + (parseInt(getSetting('abandonDays', '31'), 10) || 31)}j</div>
             </div>
           </div>
         </label>
