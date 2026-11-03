@@ -1962,6 +1962,23 @@ Règles :
   // (redirigé vers gemini-3.5-flash-lite) → on y passe nous-mêmes, testé sur de vrais devis (v2.6.45).
   // Les modèles 3.x IGNORENT temperature/top_p/top_k (et les refuseront à terme) : ne jamais les renvoyer.
   const GEMINI_MODEL = 'gemini-3.5-flash-lite';
+  const GEMINI_FALLBACK_MODEL = 'gemini-2.5-flash'; // filet : si Google refuse le nouveau modèle, on retente avec l'ancien
+
+  // Appel Gemini avec filet de sécurité : modèle inconnu / non pris en charge → on retente une fois avec l'ancien modèle.
+  async function geminiPost(apiKey, body, model) {
+    const urlFor = m => `https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent?key=${apiKey}`;
+    const m = model || GEMINI_MODEL;
+    try {
+      return await geminiFetchWithRetry(urlFor(m), body);
+    } catch (e) {
+      const msg = String(e && e.message || '');
+      if (m !== GEMINI_FALLBACK_MODEL && /404|NOT_FOUND|not found|not supported|is not available/i.test(msg)) {
+        console.warn('[Melyia] Modèle ' + m + ' refusé, repli sur ' + GEMINI_FALLBACK_MODEL + ' :', msg);
+        return await geminiFetchWithRetry(urlFor(GEMINI_FALLBACK_MODEL), body);
+      }
+      throw e;
+    }
+  }
   function geminiResponseText(data) {
     const parts = (data && data.candidates && data.candidates[0] && data.candidates[0].content && data.candidates[0].content.parts) || [];
     const text = parts.filter(p => p && typeof p.text === 'string' && !p.thought).map(p => p.text).join('').trim();
@@ -1972,8 +1989,7 @@ Règles :
   async function geminiExtract(base64Image, mimeType, opts = {}) {
     const apiKey = getSetting('apiKey', '');
     if (!apiKey) throw new Error('Clé API Gemini manquante. Va dans Réglages pour l\'ajouter.');
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`;
-    const data = await geminiFetchWithRetry(url, {
+    const data = await geminiPost(apiKey, {
       contents: [{ parts: [
         { text: opts.prompt || GEMINI_EXTRACT_PROMPT },
         { inlineData: { mimeType: mimeType, data: base64Image } }
@@ -2242,14 +2258,12 @@ Règles :
   async function geminiGenerateText(prompt, opts = {}) {
     const apiKey = getSetting('apiKey', '');
     if (!apiKey) throw new Error('Clé API Gemini manquante (Réglages)');
-    const model = opts.model || GEMINI_MODEL;
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
     const generationConfig = { maxOutputTokens: opts.maxOutputTokens ?? 4096 }; // pas de temperature (ignorée par Gemini 3.x)
     if (opts.json) generationConfig.responseMimeType = 'application/json'; // sortie JSON valide garantie par Gemini
-    const data = await geminiFetchWithRetry(url, {
+    const data = await geminiPost(apiKey, {
       contents: [{ parts: [{ text: prompt }] }],
       generationConfig
-    });
+    }, opts.model);
     return geminiResponseText(data);
   }
 
