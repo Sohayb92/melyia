@@ -1894,19 +1894,29 @@ Règles :
     throw lastErr || new Error('Gemini : échec après plusieurs tentatives');
   }
 
+  // Modèle Gemini utilisé partout. gemini-2.5-flash est retiré par Google le 1er décembre 2026
+  // (redirigé vers gemini-3.5-flash-lite) → on y passe nous-mêmes, testé sur de vrais devis (v2.6.45).
+  // Les modèles 3.x IGNORENT temperature/top_p/top_k (et les refuseront à terme) : ne jamais les renvoyer.
+  const GEMINI_MODEL = 'gemini-3.5-flash-lite';
+  function geminiResponseText(data) {
+    const parts = (data && data.candidates && data.candidates[0] && data.candidates[0].content && data.candidates[0].content.parts) || [];
+    const text = parts.filter(p => p && typeof p.text === 'string' && !p.thought).map(p => p.text).join('').trim();
+    if (!text) throw new Error('Réponse Gemini vide');
+    return text;
+  }
+
   async function geminiExtract(base64Image, mimeType, opts = {}) {
     const apiKey = getSetting('apiKey', '');
     if (!apiKey) throw new Error('Clé API Gemini manquante. Va dans Réglages pour l\'ajouter.');
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`;
     const data = await geminiFetchWithRetry(url, {
       contents: [{ parts: [
         { text: opts.prompt || GEMINI_EXTRACT_PROMPT },
         { inlineData: { mimeType: mimeType, data: base64Image } }
       ]}],
-      generationConfig: { temperature: 0.2, maxOutputTokens: opts.maxOutputTokens || 1024 }
+      generationConfig: { maxOutputTokens: opts.maxOutputTokens || 4096 }
     });
-    if (!data.candidates || !data.candidates[0]) throw new Error('Réponse Gemini vide');
-    let text = data.candidates[0].content.parts[0].text.trim();
+    let text = geminiResponseText(data);
     if (text.startsWith('```')) text = text.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '');
     try { return JSON.parse(text); }
     catch (e) {
@@ -2149,16 +2159,15 @@ Règles :
   async function geminiGenerateText(prompt, opts = {}) {
     const apiKey = getSetting('apiKey', '');
     if (!apiKey) throw new Error('Clé API Gemini manquante (Réglages)');
-    const model = opts.model || 'gemini-2.5-flash';
+    const model = opts.model || GEMINI_MODEL;
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
-    const generationConfig = { temperature: opts.temperature ?? 0.7, maxOutputTokens: opts.maxOutputTokens ?? 4096 };
+    const generationConfig = { maxOutputTokens: opts.maxOutputTokens ?? 4096 }; // pas de temperature (ignorée par Gemini 3.x)
     if (opts.json) generationConfig.responseMimeType = 'application/json'; // sortie JSON valide garantie par Gemini
     const data = await geminiFetchWithRetry(url, {
       contents: [{ parts: [{ text: prompt }] }],
       generationConfig
     });
-    if (!data.candidates || !data.candidates[0]) throw new Error('Réponse Gemini vide');
-    return data.candidates[0].content.parts[0].text.trim();
+    return geminiResponseText(data);
   }
 
   function fileToBase64(file) {
@@ -5886,7 +5895,7 @@ Bien cordialement,`;
       const promptTemplate = getSetting('vulgarizePrompt', DEFAULT_VULGARIZE_PROMPT);
       const doctor = (getSetting('doctorName', '') || '').trim() || 'Votre dentiste';
       const prompt = promptTemplate.split('{{soins}}').join(keywords).split('{{doctor}}').join(doctor);
-      const result = await geminiGenerateText(prompt, { temperature: 0.7, maxOutputTokens: 4096 });
+      const result = await geminiGenerateText(prompt, { maxOutputTokens: 4096 });
       let patientName = '', patObj = null;
       if (currentVulgarizeDevis && currentVulgarizeDevis.patient_id) {
         try { patObj = await db.patients.get(currentVulgarizeDevis.patient_id); if (patObj) patientName = patientFullName(patObj); } catch (e) {}
@@ -6203,7 +6212,7 @@ Bien cordialement,`;
             .split('{{notes}}').join(devis.notes ? String(devis.notes) : '(aucune)')
             .split('{{soinsKeys}}').join((mdKeys || []).join(', '))
             .split('{{reference}}').join(buildSoinReference(mdKeys));
-          const recit = parseGeminiJson(await geminiGenerateText(prompt, { temperature: 0.3, maxOutputTokens: 8192, json: true }));
+          const recit = parseGeminiJson(await geminiGenerateText(prompt, { maxOutputTokens: 8192, json: true }));
           recit.salutation = buildSalutation(pInfo);
           recit.nom = patientFullName(pInfo);
           recit.jeton = devis.jeton;
