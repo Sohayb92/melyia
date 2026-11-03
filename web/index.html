@@ -95,6 +95,8 @@
     .badge-pending { background: rgba(255,159,10,0.12); color: #B25C00; }
     .badge-relance { background: rgba(255,59,48,0.12); color: #C9251D; }
     .badge-relanced { background: rgba(31,58,61,0.12); color: #1F3A3D; }
+    .badge-notchosen { background: rgba(142,142,147,0.16); color: #636366; }
+    .badge-later { background: rgba(176,110,60,0.14); color: #8A5427; }
     .badge-accepted { background: rgba(46,125,91,0.15); color: #137A33; }
     .badge-refused { background: rgba(142,142,147,0.18); color: #48484A; }
     .badge-noresponse { background: rgba(175,82,222,0.14); color: #7029A0; }
@@ -1382,6 +1384,72 @@
   // le devis se classe en « Sans réponse » (ou « Accepté » si le patient a pris RDV).
   const MAX_RELANCES = 2;
 
+  // ========================================
+  // v2.6.45 — DEVIS « AU CHOIX » et ACCEPTATION EN PARTIE
+  // ========================================
+  // Choix : plusieurs devis d'un même patient liés par `choixGroupe` (le patient n'en prendra qu'UN,
+  // ex. implant OU bridge). Valider un choix → les autres passent « Non retenu » (≠ refus, hors stats).
+  // Refusé / Sans réponse sur un choix → tout le groupe suit.
+  // Acceptation en partie : le devis est coupé en deux → la partie faite maintenant passe « Accepté »,
+  // le reste devient un devis séparé « À reprendre » (repriseDe = id d'origine) avec une date de reprise :
+  // rappel POUR LE DR uniquement (carte « À relancer »), JAMAIS de mail automatique au patient.
+  const OPEN_STATUSES = ['En attente', 'Relancé'];
+
+  // Stats : un groupe de choix compte pour UN devis (le plus cher tant que rien n'est décidé),
+  // et les « Non retenu » ne comptent pas.
+  function devisForStats(list) {
+    const out = [];
+    const bestByGroup = new Map();
+    for (const d of list) {
+      if (d.status === 'Non retenu') continue;
+      if (d.choixGroupe && OPEN_STATUSES.includes(d.status)) {
+        const cur = bestByGroup.get(d.choixGroupe);
+        if (!cur || (d.montant || 0) > (cur.montant || 0)) bestByGroup.set(d.choixGroupe, d);
+        continue;
+      }
+      out.push(d);
+    }
+    return out.concat([...bestByGroup.values()]);
+  }
+
+  // « Choix 1/2 » par devis (ordre = ordre de création)
+  function choixPositions(list) {
+    const groups = new Map();
+    for (const d of list) if (d.choixGroupe) { if (!groups.has(d.choixGroupe)) groups.set(d.choixGroupe, []); groups.get(d.choixGroupe).push(d); }
+    const pos = new Map();
+    for (const arr of groups.values()) {
+      if (arr.length < 2) continue;
+      arr.sort((a, b) => (a.id || 0) - (b.id || 0));
+      arr.forEach((d, i) => pos.set(d.id, `Choix ${i + 1}/${arr.length}`));
+    }
+    return pos;
+  }
+
+  // Décision sur un choix → patchs à appliquer aux AUTRES choix encore ouverts du groupe
+  async function choixSiblingsPatch(id, patch) {
+    if (!patch || !['Accepté', 'Refusé', 'Sans réponse'].includes(patch.status)) return [];
+    const d = await db.devis.get(id);
+    if (!d || !d.choixGroupe || !d.patient_id) return [];
+    const list = await db.devis.where('patient_id').equals(d.patient_id).toArray();
+    const now = new Date().toISOString();
+    return list.filter(x => x.id !== id && x.choixGroupe === d.choixGroupe && OPEN_STATUSES.includes(x.status)).map(x => ({
+      id: x.id,
+      patch: patch.status === 'Accepté' ? { status: 'Non retenu', dateNonRetenu: now } : Object.assign({}, patch),
+      undo: { status: x.status, dateNonRetenu: x.dateNonRetenu || null, dateRefus: x.dateRefus || null, dateSansReponse: x.dateSansReponse || null }
+    }));
+  }
+
+  // « Couronne (17), Implant (36) » → ['Couronne (17)', 'Implant (36)']
+  function splitSoins(soins) {
+    return String(soins || '').split(/\s*,\s*/).map(s => s.trim()).filter(Boolean);
+  }
+
+  function addMonthsIso(date, months) {
+    const d = new Date(date);
+    d.setMonth(d.getMonth() + months);
+    return d.toISOString();
+  }
+
   // Poste émetteur : seul ce poste déclenche les envois/rappels auto (évite les doublons multi-ordi).
   function isSenderDevice() { return getSetting('senderDevice', '0') === '1'; }
 
@@ -1673,7 +1741,7 @@
     if (patientId) {
       try {
         const list = await db.devis.where('patient_id').equals(patientId).toArray();
-        list.forEach(d => { if (d.status !== 'Refusé' && Array.isArray(d.soinsKeys)) keys = keys.concat(d.soinsKeys); });
+        list.forEach(d => { if (d.status !== 'Refusé' && d.status !== 'Non retenu' && Array.isArray(d.soinsKeys)) keys = keys.concat(d.soinsKeys); });
       } catch (e) {}
     }
     return [...new Set(keys.filter(Boolean))];
@@ -2046,6 +2114,25 @@ Règles :
   }
 
   let _importQueue = []; // import multi-devis : les PDF restants à traiter, l'un après l'autre
+  let _importBatchIds = []; // devis créés par le lot d'import en cours → question « ce sont des choix ? »
+
+  // Fin d'un import de plusieurs devis pour un même patient : sont-ce des CHOIX (le patient en prendra un seul) ?
+  function proposeChoixForBatch(patientId) {
+    const ids = _importBatchIds.filter(x => x.patient_id === patientId).map(x => x.id);
+    _importBatchIds = [];
+    if (ids.length < 2) return;
+    setTimeout(() => toastConfirm(`Ces ${ids.length} devis sont-ils des choix ? (le patient n'en prendra qu'un, ex. implant ou bridge)`, {
+      confirmLabel: 'Oui, ce sont des choix',
+      cancelLabel: 'Non, tout est à faire',
+      durationMs: 20000,
+      onConfirm: async () => {
+        try { await linkDevisAsChoix(ids); } catch (e) { toast('Erreur : ' + e.message, 'error'); return; }
+        toast(`${ids.length} devis liés : le patient choisira l'un ou l'autre`, 'success');
+        renderDashboard();
+        scheduleAutoBackup();
+      }
+    }), 900);
+  }
   const _watchedSeen = new Set(); // signatures des PDF surveillés déjà pris en file → anti-doublon si un ACK se perd (main.js re-scanne le même fichier au bout de 20 s)
   let _importBatchPatient = null; // patient choisi sur le 1er devis du lot → réutilisé pour les suivants (anti-doublon)
   let _autoLinkPromise = null; // liaison auto (async) du devis importé à un dossier existant → attendue avant l'enregistrement
@@ -2279,10 +2366,19 @@ Règles :
   // L'appelant a DÉJÀ fait la maj visuelle immédiate (retrait de ligne / fermeture de fiche).
   // undoPatch fourni => toast "Annuler" qui restaure l'état précédent. preOp = écriture annexe optionnelle.
   async function applyDevisUpdate(id, patch, opts = {}) {
-    const { toastMsg = 'Enregistré', undoPatch = null, undoMsg = 'Annulé', preOp = null } = opts;
+    const { undoPatch = null, undoMsg = 'Annulé', preOp = null } = opts;
+    let { toastMsg = 'Enregistré' } = opts;
+    let siblings = [];
     try {
       if (preOp) await preOp();
-      await db.devis.update(id, patch);
+      siblings = await choixSiblingsPatch(id, patch); // devis « au choix » : les autres choix suivent
+      await db.transaction('rw', db.devis, async () => {
+        await db.devis.update(id, patch);
+        for (const s of siblings) await db.devis.update(s.id, s.patch);
+      });
+      if (siblings.length) toastMsg += patch.status === 'Accepté'
+        ? (siblings.length > 1 ? ` · les ${siblings.length} autres choix passent « Non retenu »` : ' · l\'autre choix passe « Non retenu »')
+        : (siblings.length > 1 ? ` · les ${siblings.length} autres choix aussi` : ' · l\'autre choix aussi');
     } catch (e) {
       toast('Erreur — non enregistré : ' + (e && e.message ? e.message : e), 'error');
       renderDashboard();
@@ -2296,6 +2392,7 @@ Règles :
     if (undoPatch) {
       toastUndo(toastMsg, async () => {
         try { await db.devis.update(id, undoPatch); } catch (e) {}
+        for (const s of siblings) { try { await db.devis.update(s.id, s.undo); } catch (e) {} }
         renderDashboard();
         if (isStatsViewActive()) renderStats();
         scheduleAutoBackup();
@@ -2365,7 +2462,9 @@ Règles :
       'Relancé': 'badge badge-relanced',
       'Accepté': 'badge badge-accepted',
       'Refusé': 'badge badge-refused',
-      'Sans réponse': 'badge badge-noresponse'
+      'Sans réponse': 'badge badge-noresponse',
+      'Non retenu': 'badge badge-notchosen',
+      'À reprendre': 'badge badge-later'
     };
     return `<span class="${map[status] || 'badge badge-pending'}">${status}</span>`;
   }
@@ -2625,6 +2724,11 @@ Règles :
       data.created_at = new Date().toISOString();
       const _newDevisId = await db.devis.add(data);
       _proposeSendDevis = { devis: Object.assign({ id: _newDevisId }, data), patient: selectedPatientForDevis };
+      // Import de plusieurs devis : on garde la liste du lot pour proposer « ce sont des choix ? » à la fin
+      if (pendingDevisPdf || _importBatchPatient) {
+        if (!_importBatchPatient) _importBatchIds = [];
+        _importBatchIds.push({ id: _newDevisId, patient_id: data.patient_id });
+      }
       if (pendingDevisPdf && pendingDevisPdf.base64) {
         // C2 (modèle B) : on range le PDF dès l'import → l'envoi groupé se reconstruit depuis la base (table pdfs), même plus tard
         try { await db.pdfs.where('devis_id').equals(_newDevisId).delete(); await db.pdfs.add({ devis_id: _newDevisId, name: pendingDevisPdf.name, base64: pendingDevisPdf.base64 }); } catch (e) {}
@@ -2662,6 +2766,7 @@ Règles :
         // Import MULTIPLE : pas d'ouverture auto de la fenêtre d'envoi (évitait un overlay glité) →
         // on pointe vers le bouton enveloppe « Envoyer le devis » du tableau (1 seul mail groupé).
         toast('Devis importés ✓ — clique l\'enveloppe « Envoyer le devis » dans le tableau (un seul mail groupé).', 'success');
+        proposeChoixForBatch(_sentPatientId);
       } else if (_impDevis) {
         setTimeout(() => openComposeDevisSmart(_impDevis, _impPatient), 350);
       }
@@ -2677,6 +2782,159 @@ Règles :
   });
 
   // ========================================
+  // CHOIX : lier des devis (le patient en prendra un seul)
+  // ========================================
+  function openLinkChoixModal(devis, candidates) {
+    const rows = candidates.map(c => `
+      <label class="grouped-row block cursor-pointer hover:bg-ink-50">
+        <div class="flex items-start gap-3">
+          <input type="checkbox" class="choix-cb mt-1 w-4 h-4 accent-accent flex-shrink-0" data-id="${c.id}" ${candidates.length === 1 ? 'checked' : ''}>
+          <div class="flex-1 min-w-0">
+            <div class="text-[14px] font-medium">${esc(c.soins || 'Devis')}</div>
+            <div class="text-[12px] text-ink-500 mt-0.5">${c.montant ? fmtMoney(c.montant) + ' · ' : ''}devis du ${formatDate(c.date_envoi)}</div>
+          </div>
+        </div>
+      </label>`).join('');
+    document.getElementById('modal-detail-content').innerHTML = `
+      <div class="flex items-center justify-between mb-4">
+        <button id="choix-cancel" class="text-[16px] text-ink-500 font-normal">Annuler</button>
+        <div class="text-[17px] font-semibold">Devis au choix</div>
+        <button id="choix-apply" class="text-[16px] text-accent font-semibold">Lier</button>
+      </div>
+      <p class="text-[13px] text-ink-500 mb-3">Le patient prendra <strong>l'un ou l'autre</strong>. Quand vous validerez un choix, les autres passeront tout seuls en « Non retenu » (ce n'est pas compté comme un refus).</p>
+      <div class="text-[12px] uppercase tracking-wider text-ink-500 font-semibold ml-1 mb-1.5">Ce devis</div>
+      <div class="grouped-list mb-4"><div class="grouped-row"><div class="text-[14px] font-medium">${esc(devis.soins || 'Devis')}</div><div class="text-[13px] text-ink-500 tabular-nums">${devis.montant ? fmtMoney(devis.montant) : ''}</div></div></div>
+      <div class="text-[12px] uppercase tracking-wider text-ink-500 font-semibold ml-1 mb-1.5">Est un choix avec</div>
+      <div class="grouped-list mb-2">${rows}</div>
+    `;
+    document.getElementById('choix-cancel').addEventListener('click', () => openDetail(devis.id));
+    document.getElementById('choix-apply').addEventListener('click', () => withBusyGuard('link-choix', async () => {
+      const ids = Array.from(document.querySelectorAll('.choix-cb:checked')).map(cb => parseInt(cb.dataset.id, 10));
+      if (!ids.length) { toast('Cochez au moins un autre devis', 'warning'); return; }
+      await linkDevisAsChoix([devis.id, ...ids]);
+      toast(`${ids.length + 1} devis liés : le patient choisira l'un ou l'autre`, 'success');
+      openDetail(devis.id);
+      renderDashboard();
+      scheduleAutoBackup();
+    }));
+  }
+
+  async function linkDevisAsChoix(ids) {
+    const groupe = 'c' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+    await db.transaction('rw', db.devis, async () => { for (const id of ids) await db.devis.update(id, { choixGroupe: groupe }); });
+    return groupe;
+  }
+
+  // ========================================
+  // ACCEPTATION EN PARTIE : ex. la paro maintenant, les implants plus tard
+  // ========================================
+  function openPartielModal(devis) {
+    const items = splitSoins(devis.soins);
+    const total = parseFloat(devis.montant) || 0;
+    let months = 3;
+    document.getElementById('modal-detail-content').innerHTML = `
+      <div class="flex items-center justify-between mb-4">
+        <button id="partiel-cancel" class="text-[16px] text-ink-500 font-normal">Annuler</button>
+        <div class="text-[17px] font-semibold">Accepté en partie</div>
+        <button id="partiel-apply" class="text-[16px] text-accent font-semibold">Valider</button>
+      </div>
+      <p class="text-[13px] text-ink-500 mb-4">Cochez ce que le patient fait <strong>maintenant</strong>. Le reste devient un devis séparé « À reprendre » : Mélyia vous le rappellera à la date choisie, pour en parler avec le patient. Aucun mail ne lui est envoyé.</p>
+      <div class="text-[12px] uppercase tracking-wider text-ink-500 font-semibold ml-1 mb-1.5">Fait maintenant</div>
+      <div class="grouped-list mb-5">
+        ${items.map((s, i) => `
+          <label class="grouped-row block cursor-pointer hover:bg-ink-50">
+            <div class="flex items-center gap-3">
+              <input type="checkbox" class="partiel-cb w-4 h-4 accent-accent flex-shrink-0" data-idx="${i}">
+              <div class="text-[14px] flex-1">${esc(s)}</div>
+            </div>
+          </label>`).join('')}
+      </div>
+      ${total > 0 ? `
+        <div class="text-[12px] uppercase tracking-wider text-ink-500 font-semibold ml-1 mb-1.5">Montant de ce qui est fait maintenant</div>
+        <div class="grouped-list mb-1.5">
+          <div class="grouped-row">
+            <div class="flex items-center gap-2"><input id="partiel-montant" type="number" min="0" max="${total}" step="1" inputmode="decimal" class="input !h-9 !w-32 !text-[15px]" placeholder="ex : 900"><span class="text-[14px] text-ink-500">€</span></div>
+            <div class="text-[13px] text-ink-500 tabular-nums">sur ${fmtMoney(total)}</div>
+          </div>
+        </div>
+        <div id="partiel-reste" class="text-[12px] text-ink-500 ml-1 mb-5">Mélyia ne connaît que le total du devis : indiquez le montant de cette partie, le reste se calcule tout seul.</div>
+      ` : ''}
+      <div class="text-[12px] uppercase tracking-wider text-ink-500 font-semibold ml-1 mb-1.5">Reprendre le reste avec le patient dans</div>
+      <div class="segmented mb-2" id="partiel-delai">
+        <div class="segmented-item active" data-months="3">3 mois</div>
+        <div class="segmented-item" data-months="6">6 mois</div>
+        <div class="segmented-item" data-months="12">1 an</div>
+      </div>
+      <div id="partiel-date" class="text-[12px] text-ink-500 ml-1 mb-2"></div>
+    `;
+    const showDate = () => { document.getElementById('partiel-date').textContent = 'Rappel le ' + formatDate(addMonthsIso(new Date(), months)); };
+    showDate();
+    document.querySelectorAll('#partiel-delai .segmented-item').forEach(it => it.addEventListener('click', () => {
+      months = parseInt(it.dataset.months, 10) || 3;
+      document.querySelectorAll('#partiel-delai .segmented-item').forEach(x => x.classList.toggle('active', x === it));
+      showDate();
+    }));
+    const mInput = document.getElementById('partiel-montant');
+    if (mInput) mInput.addEventListener('input', () => {
+      const v = parseFloat(mInput.value);
+      const el = document.getElementById('partiel-reste');
+      if (!isNaN(v) && v >= 0 && v <= total) el.innerHTML = `Reste à reprendre plus tard : <strong>${fmtMoney(Math.round((total - v) * 100) / 100)}</strong>`;
+      else el.textContent = v > total ? 'Le montant dépasse le total du devis.' : 'Mélyia ne connaît que le total du devis : indiquez le montant de cette partie, le reste se calcule tout seul.';
+    });
+    document.getElementById('partiel-cancel').addEventListener('click', () => openDetail(devis.id));
+    document.getElementById('partiel-apply').addEventListener('click', () => withBusyGuard('partiel-' + devis.id, async () => {
+      const checked = Array.from(document.querySelectorAll('.partiel-cb:checked')).map(cb => parseInt(cb.dataset.idx, 10));
+      if (!checked.length) { toast('Cochez ce que le patient fait maintenant', 'warning'); return; }
+      if (checked.length === items.length) { toast('Tout est coché : utilisez plutôt « ✓ Accepté »', 'warning'); return; }
+      let doneAmount = 0;
+      if (total > 0) {
+        doneAmount = parseFloat(mInput.value);
+        if (isNaN(doneAmount) || doneAmount < 0 || doneAmount > total) { toast('Indiquez le montant de ce qui est fait maintenant (au plus ' + fmtMoney(total) + ')', 'warning'); mInput.focus(); return; }
+      }
+      const nowIso = new Date().toISOString();
+      const reprise = addMonthsIso(new Date(), months);
+      const soinsNow = items.filter((_, i) => checked.includes(i)).join(', ');
+      const soinsLater = items.filter((_, i) => !checked.includes(i)).join(', ');
+      const restAmount = Math.round((total - doneAmount) * 100) / 100;
+      const undoOrig = { status: devis.status, dateAcceptation: devis.dateAcceptation || null, soins: devis.soins, montant: devis.montant, partielReprise: null };
+      let newId = null;
+      try {
+        const sibs = await choixSiblingsPatch(devis.id, { status: 'Accepté' }); // si c'était un choix, les autres choix ne sont pas retenus
+        await db.transaction('rw', db.devis, async () => {
+          newId = await db.devis.add({
+            patient_id: devis.patient_id, patient_nom: devis.patient_nom, patient_prenom: devis.patient_prenom, patient_email: devis.patient_email,
+            soins: soinsLater, soinsKeys: Array.isArray(devis.soinsKeys) ? devis.soinsKeys.slice() : [],
+            montant: restAmount, notes: 'Partie reportée du devis du ' + formatDate(devis.date_envoi) + ' (le reste a été accepté le ' + formatDate(nowIso) + ')',
+            date_envoi: devis.date_envoi, devisMailSentAt: devis.devisMailSentAt || null, jeton: devis.jeton || null,
+            status: 'À reprendre', date_relance_prevue: reprise, repriseDe: devis.id, created_at: nowIso
+          });
+          await db.devis.update(devis.id, { status: 'Accepté', dateAcceptation: nowIso, soins: soinsNow, montant: doneAmount || (total > 0 ? 0 : devis.montant), partielReprise: newId });
+          for (const s of sibs) await db.devis.update(s.id, s.patch);
+        });
+        closeDetail();
+        renderDashboard();
+        if (isStatsViewActive()) renderStats();
+        scheduleAutoBackup();
+        toastUndo('Accepté en partie · le reste est à reprendre le ' + formatDate(reprise), async () => {
+          try {
+            await db.transaction('rw', db.devis, async () => {
+              if (newId) await db.devis.delete(newId);
+              await db.devis.update(devis.id, undoOrig);
+              for (const s of sibs) await db.devis.update(s.id, s.undo);
+            });
+          } catch (e) {}
+          renderDashboard();
+          if (isStatsViewActive()) renderStats();
+          scheduleAutoBackup();
+          toast('Annulé', 'info');
+        }, { durationMs: 8000 });
+      } catch (e) {
+        toast('Erreur — non enregistré : ' + (e && e.message ? e.message : e), 'error');
+      }
+    }));
+  }
+
+  // ========================================
   // DETAIL MODAL
   // ========================================
   async function openDetail(id) {
@@ -2688,8 +2946,21 @@ Règles :
     const fullName = patientFullName(pInfo);
 
     const isRelanceDue = (devis.status === 'En attente' || devis.status === 'Relancé') && new Date(devis.date_relance_prevue).getTime() <= Date.now();
-    const isClosed = ['Accepté', 'Refusé', 'Sans réponse'].includes(devis.status);
+    const isClosed = ['Accepté', 'Refusé', 'Sans réponse', 'Non retenu'].includes(devis.status);
     const displayStatus = isRelanceDue && relances.length < MAX_RELANCES ? 'Relance due' : devis.status;
+    const isReprise = devis.status === 'À reprendre';
+    // Choix : les autres devis du même groupe + les devis ouverts du patient qu'on peut lier comme choix
+    let choixSiblings = [], choixCandidates = [];
+    if (devis.patient_id) {
+      try {
+        const _pList = await db.devis.where('patient_id').equals(devis.patient_id).toArray();
+        if (devis.choixGroupe) choixSiblings = _pList.filter(x => x.choixGroupe === devis.choixGroupe).sort((a, b) => a.id - b.id);
+        choixCandidates = _pList.filter(x => x.id !== devis.id && OPEN_STATUSES.includes(x.status) && !x.choixGroupe);
+      } catch (e) {}
+    }
+    const choixPos = choixSiblings.length > 1 ? choixSiblings.findIndex(x => x.id === devis.id) + 1 : 0;
+    const canLinkChoix = OPEN_STATUSES.includes(devis.status) && !devis.choixGroupe && choixCandidates.length > 0;
+    const canPartiel = !isClosed && splitSoins(devis.soins).length >= 2;
     const hasBeenSent = !!devis.devisMailSentAt || relances.length > 0 || devis.status === 'Relancé';
     const canMail = !!(pInfo.email && GoogleAuth.isConnected());
     const maxRelancesReached = !isClosed && relances.length >= MAX_RELANCES; // règle : 2 relances max
@@ -2707,6 +2978,7 @@ Règles :
           ${statusBadge(displayStatus)}
         </div>
         ${devis.soins ? `<div class="text-[15px] text-ink-700 font-medium mt-1 leading-snug">${esc(devis.soins)}</div>` : ''}
+        ${choixPos ? `<div class="mt-2 text-[13px] leading-snug px-3 py-2 rounded-lg" style="background: rgba(176,110,60,0.08)"><span class="font-semibold" style="color:#8A5427">Choix ${choixPos} sur ${choixSiblings.length}</span> · le patient n'en prendra qu'un.<br><span class="text-ink-500">Autre${choixSiblings.length > 2 ? 's' : ''} choix : ${choixSiblings.filter(x => x.id !== devis.id).map(x => esc(x.soins || 'devis') + ' (' + esc(x.status) + ')').join(' · ')}</span></div>` : ''}
         ${patient ? `<button id="open-patient-from-devis" class="text-[13px] text-accent hover:underline mt-1.5">Voir la fiche patient →</button>` : ''}
       </div>
 
@@ -2732,6 +3004,12 @@ Règles :
           <div class="grouped-row">
             <div class="text-[14px] text-ink-700">${devis.status === 'En attente' ? 'Relance prévue' : 'Vérification prévue'}</div>
             <div class="text-[14px] font-medium tabular-nums ${isRelanceDue ? 'text-danger' : ''}">${formatDate(devis.date_relance_prevue)}</div>
+          </div>
+        ` : ''}
+        ${isReprise ? `
+          <div class="grouped-row">
+            <div class="text-[14px] text-ink-700">À reprendre avec le patient le</div>
+            <div class="text-[14px] font-medium tabular-nums">${formatDate(devis.date_relance_prevue)}</div>
           </div>
         ` : ''}
       </div>
@@ -2763,7 +3041,9 @@ Règles :
       <div class="text-[12px] uppercase tracking-wider text-ink-500 font-semibold ml-1 mb-1.5">Actions</div>
       <div class="space-y-2 mb-2">
         ${!isClosed ? `
-          ${maxRelancesReached
+          ${isReprise
+            ? `<div class="text-[13px] text-ink-500 text-center py-1">Partie reportée : rappel pour vous seulement, pas de mail au patient.</div>`
+            : maxRelancesReached
             ? `<div class="text-[13px] text-ink-500 text-center py-1">2 relances déjà envoyées : pas de 3e relance.</div>
                <button class="action-btn btn btn-primary w-full" data-action="noresponse">Classer « Sans réponse »</button>`
             : canMail
@@ -2775,6 +3055,7 @@ Règles :
             <button class="action-btn btn btn-success" data-action="accepted">✓ Accepté</button>
             <button class="action-btn btn btn-secondary" data-action="refused">Refusé</button>
           </div>
+          ${canPartiel ? `<button class="action-btn btn btn-secondary w-full" data-action="partiel">Accepté en partie…</button>` : ''}
           <button class="action-btn btn btn-secondary w-full" data-action="toggle-more">Plus d'actions…</button>
           <div id="more-actions" class="hidden">
             <div class="text-[11px] uppercase tracking-wider text-ink-400 font-semibold mt-3 mb-1.5 ml-1">Envoi & outils</div>
@@ -2787,6 +3068,8 @@ Règles :
             <div class="space-y-2">
               ${devis.status === 'En attente' ? `<button class="action-btn btn btn-secondary w-full" data-action="relancer">Marquer relancé (sans mail)</button>` : ''}
               ${(devis.status === 'En attente' || devis.status === 'Relancé') && !maxRelancesReached ? `<button class="action-btn btn btn-secondary w-full" data-action="noresponse">Sans réponse</button>` : ''}
+              ${canLinkChoix ? `<button class="action-btn btn btn-secondary w-full" data-action="link-choix">Lier à un autre devis (le patient choisira l'un ou l'autre)</button>` : ''}
+              ${devis.choixGroupe ? `<button class="action-btn btn btn-secondary w-full" data-action="unlink-choix">Ne plus traiter comme un choix</button>` : ''}
             </div>
             <div class="text-[11px] uppercase tracking-wider text-danger/60 font-semibold mt-4 mb-1.5 ml-1">Zone sensible</div>
             <div class="space-y-2">
@@ -2848,6 +3131,20 @@ Règles :
           catch (e) { window.prompt('Lien page patient :', url); }
           return;
         }
+        if (action === 'link-choix') { openLinkChoixModal(devis, choixCandidates); return; }
+        if (action === 'unlink-choix') {
+          await withBusyGuard('unlink-choix-' + id, async () => {
+            const rest = choixSiblings.filter(x => x.id !== devis.id);
+            await db.transaction('rw', db.devis, async () => {
+              await db.devis.update(devis.id, { choixGroupe: null });
+              if (rest.length < 2) for (const x of rest) await db.devis.update(x.id, { choixGroupe: null }); // un « groupe » d'un seul devis n'a plus de sens
+            });
+            closeDetail(); renderDashboard(); scheduleAutoBackup();
+            toast('Ce devis n\'est plus un choix', 'success');
+          });
+          return;
+        }
+        if (action === 'partiel') { openPartielModal(devis); return; }
         // P1-B — actions de décision : optimistic UI + Annuler (Accepté / Refusé / Sans réponse / Soin terminé)
         if (action === 'accepted' || action === 'refused' || action === 'noresponse' || action === 'soin-termine') {
           let patch, undoPatch, msg;
@@ -2882,7 +3179,7 @@ Règles :
           } else if (action === 'reopen') {
             const relanceDays = parseInt(getSetting('relanceDays', '14'), 10) || 14;
             // Reopen efface dateAcceptation/Refus/SansReponse pour ne pas polluer les stats events-based
-            await db.devis.update(id, { status: 'En attente', date_relance_prevue: addDays(new Date(), relanceDays), dateAcceptation: null, dateRefus: null, dateSansReponse: null });
+            await db.devis.update(id, { status: 'En attente', date_relance_prevue: addDays(new Date(), relanceDays), dateAcceptation: null, dateRefus: null, dateSansReponse: null, dateNonRetenu: null });
             toast('Remis en attente', 'success');
           } else if (action === 'undo-soin-termine') {
             await db.devis.update(id, { soinTermine: false, dateSoinTermine: null });
@@ -2950,17 +3247,19 @@ Règles :
     const _relanceCount = new Map();
     (await db.relances.toArray()).forEach(r => _relanceCount.set(r.devis_id, (_relanceCount.get(r.devis_id) || 0) + 1));
 
-    // Stats
-    const total = all.length;
-    const pending = all.filter(d => d.status === 'En attente' || d.status === 'Relancé');
-    const accepted = all.filter(d => d.status === 'Accepté');
-    const refused = all.filter(d => d.status === 'Refusé');
-    const noResponse = all.filter(d => d.status === 'Sans réponse');
+    // Stats — un groupe de choix compte pour un devis, « Non retenu » exclu (devisForStats)
+    const _allStats = devisForStats(all);
+    const _choixPos = choixPositions(all);
+    const total = _allStats.length;
+    const pending = _allStats.filter(d => d.status === 'En attente' || d.status === 'Relancé' || d.status === 'À reprendre');
+    const accepted = _allStats.filter(d => d.status === 'Accepté');
+    const refused = _allStats.filter(d => d.status === 'Refusé');
+    const noResponse = _allStats.filter(d => d.status === 'Sans réponse');
     const treated = accepted.length + refused.length + noResponse.length;
     // Taux de conversion = accepté / total envoyé (inclut le pipeline pending = honnête business KPI)
     const rate = total > 0 ? Math.round((accepted.length / total) * 100) + '%' : '—';
 
-    const totalAmount = all.reduce((s, d) => s + (d.montant || 0), 0);
+    const totalAmount = _allStats.reduce((s, d) => s + (d.montant || 0), 0);
     const pendingAmount = pending.reduce((s, d) => s + (d.montant || 0), 0);
     const acceptedAmount = accepted.reduce((s, d) => s + (d.montant || 0), 0);
 
@@ -3000,7 +3299,7 @@ Règles :
     const _isNeverSentImported = d => d.status === 'En attente' && !d.devisMailSentAt && d.pdfStored;
     const _today = dayStart(now); // à la journée : la carte est complète dès la 1re ouverture du jour
     const relancesDues = all.filter(d => {
-      if (d.status !== 'En attente' && d.status !== 'Relancé') return false;
+      if (d.status !== 'En attente' && d.status !== 'Relancé' && d.status !== 'À reprendre') return false; // « À reprendre » = rappel pour le Dr (partie reportée)
       if (!_isNeverSentImported(d) && dayStart(d.date_relance_prevue) > _today) return false;
       const p = d.patient_id ? getCachedPatient(d.patient_id) : null;
       if (p && p.noContact === true) return false;
@@ -3022,18 +3321,19 @@ Règles :
         const neverSent = isFirst && !d.devisMailSentAt; // jamais envoyé au patient → action = ENVOYER (pas relancer)
         const pInfo = devisPatientDisplay(d);
         // Bouton mail Mélyia si Google connecté + email patient présent ; sinon fallback "Marquer relancé"
-        const _maxRelances = !isFirst && (_relanceCount.get(d.id) || 0) >= MAX_RELANCES; // 2 relances déjà envoyées
-        const canMailFromMelyia = !_maxRelances && googleReady && !!(pInfo && pInfo.email);
+        const _isReprise = d.status === 'À reprendre'; // partie reportée : rappel pour le Dr, jamais de mail
+        const _maxRelances = !isFirst && !_isReprise && (_relanceCount.get(d.id) || 0) >= MAX_RELANCES; // 2 relances déjà envoyées
+        const canMailFromMelyia = !_isReprise && !_maxRelances && googleReady && !!(pInfo && pInfo.email);
         const mailIconSvg = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>';
         const dashIconSvg = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"/></svg>';
-        const relanceBtnHtml = canMailFromMelyia
+        const relanceBtnHtml = _isReprise ? '' : canMailFromMelyia
           ? `<button class="mail-relance-btn btn btn-primary btn-sm !px-3" data-id="${d.id}" title="${neverSent ? 'Envoyer le devis au patient' : 'Relancer par mail (Mélyia)'}">${mailIconSvg}</button>`
           : (isFirst
               ? `<button class="quick-relance-btn btn btn-secondary btn-sm !px-3" data-id="${d.id}" data-first="true" title="Marquer comme relancé (sans envoyer de mail)">${mailIconSvg}</button>`
               : `<button class="quick-relance-btn btn btn-secondary btn-sm !px-3" data-id="${d.id}" data-first="false" title="Sans réponse">${dashIconSvg}</button>`);
         // Audit ergonomie : retard visible (« dû depuis X j », comme la carte maintenance)
         const _lateDays = Math.floor((_today - dayStart(d.date_relance_prevue)) / 86400000);
-        const dueLabel = _isNeverSentImported(d) ? '' : _maxRelances ? ' · <span class="font-medium">pas de 3e relance : à classer « Sans réponse »</span>' : (_lateDays > 0 ? ` · <span class="text-danger font-medium">dû depuis ${_lateDays} j</span>` : ' · dû aujourd\'hui');
+        const dueLabel = _isNeverSentImported(d) ? '' : _isReprise ? ' · <span class="font-medium">à reprendre avec le patient</span>' : _maxRelances ? ' · <span class="font-medium">pas de 3e relance : à classer « Sans réponse »</span>' : (_lateDays > 0 ? ` · <span class="text-danger font-medium">dû depuis ${_lateDays} j</span>` : ' · dû aujourd\'hui');
         // Plusieurs devis dus pour ce patient → 1 SEUL mail les couvrira tous (openComposeRelanceSmart)
         const _sameP = d.patient_id ? relancesDues.filter(x => x.patient_id === d.patient_id && !_isNeverSentImported(x)).length : 1;
         const groupLabel = (!_isNeverSentImported(d) && _sameP > 1) ? ` · <span class="text-accent font-medium">${_sameP} devis → 1 mail</span>` : '';
@@ -3042,7 +3342,8 @@ Règles :
             <div class="flex-1 min-w-0 cursor-pointer open-detail-btn" data-id="${d.id}">
               <div class="flex items-center gap-2">
                 <div class="text-[15px] font-semibold truncate">${esc(patientFullName(pInfo))}</div>
-                ${neverSent ? '<span class="text-[10px] uppercase tracking-wider font-bold" style="color: var(--color-copper-600)">À envoyer</span>' : (_maxRelances ? '<span class="text-[10px] uppercase tracking-wider text-ink-500 font-bold whitespace-nowrap" title="2 relances déjà envoyées : pas de 3e relance">2 relances</span>' : (!isFirst ? '<span class="text-[10px] uppercase tracking-wider text-accent font-bold whitespace-nowrap">Relance #2</span>' : ''))}
+                ${_choixPos.get(d.id) ? '<span class="text-[10px] uppercase tracking-wider font-bold whitespace-nowrap" style="color:#8A5427">' + _choixPos.get(d.id) + '</span>' : ''}
+                ${neverSent ? '<span class="text-[10px] uppercase tracking-wider font-bold" style="color: var(--color-copper-600)">À envoyer</span>' : _isReprise ? '<span class="text-[10px] uppercase tracking-wider font-bold whitespace-nowrap" style="color:#8A5427">À reprendre</span>' : (_maxRelances ? '<span class="text-[10px] uppercase tracking-wider text-ink-500 font-bold whitespace-nowrap" title="2 relances déjà envoyées : pas de 3e relance">2 relances</span>' : (!isFirst ? '<span class="text-[10px] uppercase tracking-wider text-accent font-bold whitespace-nowrap">Relance #2</span>' : ''))}
               </div>
               <div class="text-[13px] text-ink-500 truncate">${esc(d.soins)} ${d.montant ? '· ' + fmtMoney(d.montant) : ''}${dueLabel}${groupLabel}</div>
             </div>
@@ -3237,7 +3538,7 @@ Règles :
                   ${statusBadge(displayStatus)}
                 </div>
                 <div class="text-[13px] text-ink-500 mt-0.5 truncate">
-                  ${esc(d.soins)} ${d.montant ? '· ' + fmtMoney(d.montant) : ''} · ${timeAgo(d.date_envoi)}
+                  ${esc(d.soins)} ${d.montant ? '· ' + fmtMoney(d.montant) : ''}${_choixPos.get(d.id) ? ' · <span class="font-medium" style="color:#8A5427">' + _choixPos.get(d.id) + '</span>' : ''} · ${timeAgo(d.date_envoi)}
                 </div>
               </div>
               ${d.montant ? `<div class="row-montant text-[14px] font-medium tabular-nums text-ink-700 flex-shrink-0">${fmtMoney(d.montant)}</div>` : ''}
@@ -3398,8 +3699,8 @@ Règles :
     const id = d.id;
     const mailSvg = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>';
     const checkSvg = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>';
-    if (d.status === 'En attente' || d.status === 'Relancé') {
-      const canMail = googleReady && !!(pInfo && pInfo.email) && (relanceCount || 0) < MAX_RELANCES; // pas de 3e relance
+    if (d.status === 'En attente' || d.status === 'Relancé' || d.status === 'À reprendre') {
+      const canMail = d.status !== 'À reprendre' && googleReady && !!(pInfo && pInfo.email) && (relanceCount || 0) < MAX_RELANCES; // pas de 3e relance, ni de mail pour une partie reportée
       const neverSent = d.status === 'En attente' && !d.devisMailSentAt;
       const relance = canMail ? `<button class="mail-relance-btn btn btn-secondary btn-sm !px-2.5" data-id="${id}" title="${neverSent ? 'Envoyer le devis' : 'Relancer par mail'}">${mailSvg}</button>` : '';
       return `${relance}<button class="quick-action-btn btn btn-success btn-sm !px-2.5" data-id="${id}" data-action="accepted" title="Marquer accepté">${checkSvg}</button>`;
@@ -3629,7 +3930,7 @@ Règles :
 
   async function renderStats() {
     await refreshPatientsCache();
-    const all = await db.devis.toArray();
+    const all = devisForStats(await db.devis.toArray()); // choix = 1 devis, « Non retenu » exclu
     const offset = currentStatsMonthOffset;
     const { start, end } = getMonthRange(offset);
     const { start: prevStart, end: prevEnd } = getMonthRange(offset - 1);
@@ -3669,7 +3970,7 @@ Règles :
     const caEnvoye = monthDevisEnvoyes.reduce((s, d) => s + (d.montant || 0), 0);
     const caAccepte = acceptes.reduce((s, d) => s + (d.montant || 0), 0);
     const taux = decides > 0 ? Math.round((acceptes.length / decides) * 100) : null;
-    const pending = all.filter(d => d.status === 'En attente' || d.status === 'Relancé');
+    const pending = all.filter(d => d.status === 'En attente' || d.status === 'Relancé' || d.status === 'À reprendre');
     const caAttente = pending.reduce((s, d) => s + (d.montant || 0), 0);
 
     // Mois précédent (events-based)
@@ -3685,7 +3986,8 @@ Règles :
     // Render cards
     document.getElementById('stat-ca-envoye').textContent = fmtMoney(caEnvoye);
     document.getElementById('stat-ca-envoye-delta').innerHTML = formatDelta(caEnvoye, caEnvoyePrev);
-    document.getElementById('stat-devis-count').textContent = `${monthDevisEnvoyes.length} devis envoyé${monthDevisEnvoyes.length > 1 ? 's' : ''}`;
+    const _nbEnvoyes = monthDevisEnvoyes.filter(d => !d.repriseDe).length; // une partie reportée n'est pas un nouveau devis envoyé
+    document.getElementById('stat-devis-count').textContent = `${_nbEnvoyes} devis envoyé${_nbEnvoyes > 1 ? 's' : ''}`;
 
     document.getElementById('stat-ca-accepte').textContent = fmtMoney(caAccepte);
     // Mois en cours encore à 0 → « Mois en cours » plutôt que « -100 % vs M-1 » (faux négatif en début de mois)
@@ -4318,7 +4620,7 @@ Règles :
     devisList.sort((a, b) => new Date(b.date_envoi) - new Date(a.date_envoi));
     const maintenancesList = await getMaintenancesForPatient(id);
 
-    const total = devisList.reduce((s, d) => s + (d.montant || 0), 0);
+    const total = devisForStats(devisList).reduce((s, d) => s + (d.montant || 0), 0);
     const accepted = devisList.filter(d => d.status === 'Accepté');
     const refused = devisList.filter(d => d.status === 'Refusé');
     const noResp = devisList.filter(d => d.status === 'Sans réponse');
@@ -6502,7 +6804,8 @@ Bien cordialement,`;
         if (!d.pdfStored) continue;
         const closedAt = d.soinTermine ? d.dateSoinTermine
           : (d.status === 'Refusé' ? d.dateRefus
-          : (d.status === 'Sans réponse' ? d.dateSansReponse : null));
+          : (d.status === 'Sans réponse' ? d.dateSansReponse
+          : (d.status === 'Non retenu' ? d.dateNonRetenu : null)));
         if (!closedAt || new Date(closedAt).getTime() > cutoff) continue;
         const n = await db.pdfs.where('devis_id').equals(d.id).delete();
         if (n) { await db.devis.update(d.id, { pdfStored: false }); console.log('[Melyia] PDF purgé (devis clos +6 mois) :', d.id); }
@@ -6535,7 +6838,7 @@ Bien cordialement,`;
     const all = await db.devis.toArray();
     const _todayStart = dayStart(Date.now()); // même règle « à la journée » que le tableau de bord
     const relancesDues = all.filter(d => {
-      if (d.status !== 'En attente' && d.status !== 'Relancé') return false;
+      if (d.status !== 'En attente' && d.status !== 'Relancé' && d.status !== 'À reprendre') return false;
       if (dayStart(d.date_relance_prevue) > _todayStart) return false;
       // Compliance LCEN : ne pas inclure les patients STOP dans le récap matinal
       const p = d.patient_id ? getCachedPatient(d.patient_id) : null;
@@ -6562,7 +6865,7 @@ Bien cordialement,`;
       body += relancesDues.map(d => {
         const p = devisPatientDisplay(d);
         const moneyStr = d.montant ? ` (${fmtMoney(d.montant)})` : '';
-        const tag = d.status === 'Relancé' ? ' [déjà relancé une fois]' : '';
+        const tag = d.status === 'À reprendre' ? ' [partie reportée : à reprendre avec le patient]' : (d.status === 'Relancé' ? ' [déjà relancé une fois]' : '');
         return `• ${patientFullName(p)} — ${d.soins || ''}${moneyStr} — envoyé ${formatDate(d.date_envoi)}${tag}`;
       }).join('\n');
       const totalAmount = relancesDues.reduce((s, d) => s + (d.montant || 0), 0);
